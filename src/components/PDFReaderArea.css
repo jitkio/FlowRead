@@ -1,0 +1,347 @@
+/* ==========================================================================
+   FlowRead - PDFReaderArea Styles (Minimalist VS Code / Geek Engineering Standard)
+   ========================================================================== */
+
+.pdf-reader-container {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 70%;
+  width: 70%;
+  height: 100%;
+  background-color: var(--bg-paper, #ffffff);
+  overflow: hidden;
+  position: relative;
+  user-select: text;
+}
+
+@keyframes pdf-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 核心滚动视口：对接 Lerp 动力学与虚拟滚动 (扣除顶部单层 36px 菜单栏高度) */
+.pdf-scroll-viewport {
+  width: 100%;
+  flex: 1;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 24px 0;
+  position: relative;
+  scroll-behavior: auto;
+  overflow-anchor: none;
+}
+
+/* 隐藏原生滚动条，使用手写动力学滑块 */
+.pdf-scroll-viewport::-webkit-scrollbar {
+  display: none;
+}
+.pdf-scroll-viewport {
+  scrollbar-width: none;
+}
+
+/* 虚拟列表绝对定位舞台 */
+.pdf-virtual-stage {
+  width: 100%;
+  position: relative;
+}
+
+.pdf-virtual-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+/* ==========================================================================
+   三明治单页卡片结构 (PDFPage)
+   ========================================================================== */
+.pdf-page-card {
+  position: relative;
+  background: #ffffff;
+  border-radius: 2px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  border: 1px solid var(--border-light, #e2e8f0);
+  overflow: hidden;
+  transition: box-shadow 0.15s ease;
+  user-select: text;
+}
+
+.pdf-page-card:hover {
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.09), 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.pdf-page-number-indicator {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-secondary, #475569);
+  background-color: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  padding: 2px 6px;
+  border-radius: 2px;
+  border: 1px solid var(--border-light, #e2e8f0);
+  z-index: 5;
+  pointer-events: none;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+/* 三明治主容器：Canvas 与 TextLayer 绝对重叠容器 */
+.pdf-page-sandwich {
+  position: relative;
+  overflow: hidden;
+}
+
+/* 底层视觉：Canvas 包装器（事件穿透，由中层 TextLayer 响应鼠标划词） */
+.canvasWrapper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.pdf-page-canvas {
+  display: block;
+}
+
+/* 中层交互：TextLayer 文本层（DOM 透明字体，绝对重合 Canvas 几何坐标） */
+.textLayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: clip;
+  z-index: 2;
+  line-height: 1;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 文本层内所有字形设为透明，视觉上完全透视到底层 Canvas 的高保真字形与公式图片 */
+.textLayer :is(span, br) {
+  color: transparent !important;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 原生划词高亮色 (VS Code 技术冷蓝高亮，高亮文字而不遮挡下方 Canvas 图像细节) */
+.textLayer ::selection {
+  background-color: rgba(2, 132, 199, 0.28) !important;
+  color: transparent !important;
+}
+
+/* 页面加载中骨架提示 */
+.pdf-page-skeleton {
+  position: absolute;
+  inset: 0;
+  background-color: #fafafa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.pdf-skeleton-pulse {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid rgba(2, 132, 199, 0.15);
+  border-top-color: var(--accent-primary, #0284c7);
+  animation: pdf-spin 0.8s linear infinite;
+}
+
+/* 空白欢迎态 */
+.pdf-empty-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  width: 100%;
+}
+
+.empty-card {
+  text-align: center;
+  max-width: 480px;
+  padding: 40px 32px;
+  background: #ffffff;
+  border-radius: 4px;
+  border: 1px solid var(--border-light, #e2e8f0);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.05);
+}
+
+.empty-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-main, #0f172a);
+  margin-bottom: 12px;
+}
+
+.empty-desc {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary, #475569);
+  margin-bottom: 24px;
+}
+
+.empty-desc code {
+  font-family: var(--font-mono, monospace);
+  background-color: #f1f5f9;
+  padding: 2px 5px;
+  border-radius: 2px;
+  border: 1px solid var(--border-light, #e2e8f0);
+  color: var(--accent-primary, #0284c7);
+}
+
+.empty-action-btn {
+  padding: 8px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  background-color: var(--accent-primary, #0284c7);
+  color: #ffffff;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.empty-action-btn:hover {
+  background-color: var(--accent-hover, #0369a1);
+}
+
+/* ==========================================================================
+   阶段三：多模态区域框选 (Region Selection) 与视觉大模型接入
+   ========================================================================== */
+
+/* Alt 激活态时的鼠标样式与交互反馈 */
+.pdf-page-sandwich.alt-mode {
+  cursor: crosshair !important;
+}
+
+.pdf-page-sandwich.alt-mode * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+.pdf-page-sandwich.alt-mode .textLayer {
+  pointer-events: none !important;
+}
+
+/* 虚线半透明选区框 (技术冷蓝虚线边框 + 半透明底色) */
+.selection-box {
+  position: absolute;
+  border: 1.5px dashed #0284c7;
+  background: rgba(2, 132, 199, 0.08);
+  backdrop-filter: blur(1px);
+  -webkit-backdrop-filter: blur(1px);
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 20;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6) inset, 0 2px 8px rgba(2, 132, 199, 0.15);
+}
+
+/* 框选尺寸提示微徽标 */
+.selection-box-dim {
+  position: absolute;
+  bottom: -20px;
+  right: 0;
+  font-size: 10px;
+  font-family: var(--font-mono, monospace);
+  color: #0369a1;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 1px 5px;
+  border-radius: 2px;
+  border: 1px solid rgba(2, 132, 199, 0.25);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* 图像选区浮动菜单 (Image Selection Toolbar) - VS Code 极简风格 */
+.image-selection-toolbar {
+  position: absolute;
+  z-index: 30;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  width: 230px;
+  gap: 4px;
+  padding: 4px;
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 3px;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(15, 23, 42, 0.05);
+  user-select: none;
+}
+
+.image-selection-toolbar .toolbar-buttons-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+}
+
+.image-toolbar-btn {
+  background: transparent;
+  border: none;
+  outline: none;
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  color: #334155;
+  border-radius: 2px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  white-space: nowrap;
+  transition: background-color 0.1s ease, color 0.1s ease;
+}
+
+.image-toolbar-btn:hover {
+  background-color: #f1f5f9;
+  color: #0f172a;
+}
+
+.image-toolbar-btn:active {
+  background-color: #e2e8f0;
+  color: #0284c7;
+}
+
+.image-toolbar-close-btn {
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 4px 7px;
+  font-size: 13px;
+  color: #94a3b8;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background-color 0.1s ease, color 0.1s ease;
+}
+
+.image-toolbar-close-btn:hover {
+  background-color: #f1f5f9;
+  color: #0f172a;
+}
