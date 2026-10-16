@@ -1,6 +1,6 @@
 /**
  * FlowRead - 提示词工程配置管理器 (Prompt Config Manager)
- * 管理全局前置规则与五个核心动作的独立提示词，采用 localStorage 持久化
+ * 管理全局前置规则与八个核心动作的独立提示词，采用 localStorage 持久化
  */
 
 export interface PromptConfig {
@@ -16,9 +16,15 @@ export interface PromptConfig {
   analyzeChart: string;
   /** 浓缩提炼动作专属提示词 */
   summarize: string;
+  /** 针对选区提问 (Ask) 专属提示词 */
+  ask: string;
+  /** 深入浅出/简化 (Simplify) 专属提示词 */
+  simplify: string;
+  /** 图像/选区文字提取 (Extract Text / OCR) 专属提示词 */
+  extractText: string;
 }
 
-const STORAGE_KEY = "flowread_prompt_config_v1";
+const STORAGE_KEY = "flowread_prompt_config_v2";
 
 export const DEFAULT_PROMPT_CONFIG: PromptConfig = {
   globalPrompt:
@@ -33,14 +39,20 @@ export const DEFAULT_PROMPT_CONFIG: PromptConfig = {
     "你是一位顶级的多模态视觉分析专家与工程学者。请对用户框选的工程图表、电路拓扑、系统架构图或科学插图进行深度剖析。详细解析各组件关系、流向逻辑、数值趋势及核心物理/工程机理。排版严谨，优先使用学术 Markdown 排版。",
   summarize:
     "你是一个精准的信息萃取器。请一针见血地提炼该内容的绝对核心论点、技术要义与关键结论，字数精炼节制，层次清晰。",
+  ask:
+    "你是一位博学且严谨的技术与学术导师。用户针对文章选区或上下文提出了具体问题，请结合所选原文与前后脉络，给出精准、透彻且结构清晰的回答。",
+  simplify:
+    "你是一位通俗化阐释与认知科学专家。请用最质朴、生动的大白话和贴近生活经验的直观类比，化繁为简解释该段落或术语，去除所有晦涩包袱，让非专业读者一眼看懂核心要义。",
+  extractText:
+    "你是一个严谨的多模态文字转录与 OCR 引擎。请精准提取并转录图片或内容中的文字与结构，保持原始换行、标点与层级排版，不添加任何推测或多余的说明。",
 };
 
 /**
- * 读取当前持久化的 Prompt 配置
+ * 读取当前持久化的 Prompt 配置（支持从 v1 优雅迁移）
  */
 export function loadPromptConfig(): PromptConfig {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem("flowread_prompt_config_v1");
     if (!raw) return DEFAULT_PROMPT_CONFIG;
     const parsed = JSON.parse(raw);
     return {
@@ -53,6 +65,9 @@ export function loadPromptConfig(): PromptConfig {
       extractFormula: parsed.extractFormula || DEFAULT_PROMPT_CONFIG.extractFormula,
       analyzeChart: parsed.analyzeChart || DEFAULT_PROMPT_CONFIG.analyzeChart,
       summarize: parsed.summarize || DEFAULT_PROMPT_CONFIG.summarize,
+      ask: parsed.ask || DEFAULT_PROMPT_CONFIG.ask,
+      simplify: parsed.simplify || DEFAULT_PROMPT_CONFIG.simplify,
+      extractText: parsed.extractText || DEFAULT_PROMPT_CONFIG.extractText,
     };
   } catch (err) {
     console.warn("[promptConfig] 读取配置失败，采用默认值:", err);

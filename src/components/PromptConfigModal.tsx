@@ -8,7 +8,15 @@ export interface PromptConfigModalProps {
   onClose: () => void;
 }
 
-type ActionTabKey = "translate" | "explain" | "extractFormula" | "analyzeChart" | "summarize";
+type ActionTabKey =
+  | "translate"
+  | "explain"
+  | "ask"
+  | "simplify"
+  | "extractFormula"
+  | "analyzeChart"
+  | "extractText"
+  | "summarize";
 
 interface ActionTabMeta {
   key: ActionTabKey;
@@ -19,8 +27,11 @@ interface ActionTabMeta {
 const ACTION_TABS: ActionTabMeta[] = [
   { key: "translate", label: "翻译 (Translate)", hint: "划选纯文本时的学术翻译规范" },
   { key: "explain", label: "解释 (Explain)", hint: "划选概念与原理时的深层原理解析" },
+  { key: "ask", label: "提问 (Ask)", hint: "针对选区输入问题时的深入解答约束" },
+  { key: "simplify", label: "简化 (Simplify)", hint: "化繁为简、通俗化大白话阐释" },
   { key: "extractFormula", label: "提取公式 (LaTeX)", hint: "图像或复杂文本的严格纯净 LaTeX 语法解析" },
   { key: "analyzeChart", label: "解析图表 (Vision)", hint: "Alt 框选电路、架构、曲线等图表剖析" },
+  { key: "extractText", label: "提取文字 (OCR)", hint: "精准图像文字识别与原始排版转录" },
   { key: "summarize", label: "浓缩提炼 (Summarize)", hint: "学术段落核心论点与关键要义高度提炼" },
 ];
 
@@ -36,6 +47,9 @@ export default function PromptConfigModal({
   const [extractFormula, setExtractFormula] = useState(initialConfig.extractFormula);
   const [analyzeChart, setAnalyzeChart] = useState(initialConfig.analyzeChart);
   const [summarize, setSummarize] = useState(initialConfig.summarize);
+  const [ask, setAsk] = useState(initialConfig.ask);
+  const [simplify, setSimplify] = useState(initialConfig.simplify);
+  const [extractText, setExtractText] = useState(initialConfig.extractText);
 
   const [activeTab, setActiveTab] = useState<ActionTabKey>("translate");
 
@@ -48,15 +62,19 @@ export default function PromptConfigModal({
       setExtractFormula(initialConfig.extractFormula);
       setAnalyzeChart(initialConfig.analyzeChart);
       setSummarize(initialConfig.summarize);
+      setAsk(initialConfig.ask);
+      setSimplify(initialConfig.simplify);
+      setExtractText(initialConfig.extractText);
       setActiveTab("translate");
     }
   }, [isOpen, initialConfig]);
 
-  // 监听 Esc 快捷键关闭
+  // 监听 Esc 快捷键关闭（优先关闭弹窗并阻止冒泡）
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent): void => {
       if (e.key === "Escape") {
+        e.stopPropagation();
         onClose();
       }
     };
@@ -75,6 +93,9 @@ export default function PromptConfigModal({
       extractFormula: extractFormula.trim(),
       analyzeChart: analyzeChart.trim(),
       summarize: summarize.trim(),
+      ask: ask.trim(),
+      simplify: simplify.trim(),
+      extractText: extractText.trim(),
     });
     onClose();
   };
@@ -87,6 +108,9 @@ export default function PromptConfigModal({
     setExtractFormula(defaultConfig.extractFormula);
     setAnalyzeChart(defaultConfig.analyzeChart);
     setSummarize(defaultConfig.summarize);
+    setAsk(defaultConfig.ask);
+    setSimplify(defaultConfig.simplify);
+    setExtractText(defaultConfig.extractText);
   };
 
   const getActivePromptValue = (): string => {
@@ -95,10 +119,16 @@ export default function PromptConfigModal({
         return translate;
       case "explain":
         return explain;
+      case "ask":
+        return ask;
+      case "simplify":
+        return simplify;
       case "extractFormula":
         return extractFormula;
       case "analyzeChart":
         return analyzeChart;
+      case "extractText":
+        return extractText;
       case "summarize":
         return summarize;
     }
@@ -112,11 +142,20 @@ export default function PromptConfigModal({
       case "explain":
         setExplain(val);
         break;
+      case "ask":
+        setAsk(val);
+        break;
+      case "simplify":
+        setSimplify(val);
+        break;
       case "extractFormula":
         setExtractFormula(val);
         break;
       case "analyzeChart":
         setAnalyzeChart(val);
+        break;
+      case "extractText":
+        setExtractText(val);
         break;
       case "summarize":
         setSummarize(val);
@@ -166,14 +205,14 @@ export default function PromptConfigModal({
             />
           </div>
 
-          {/* 五大动作提示词切换 Tab */}
+          {/* 动作提示词切换 Tab */}
           <div className="prompt-actions-container">
             <label className="settings-field-label">
               <span>内置动作独立提示词配置</span>
               <span className="settings-label-hint">{activeTabMeta.hint}</span>
             </label>
 
-            <div className="prompt-tabs-bar">
+            <div className="prompt-tabs-bar" style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
               {ACTION_TABS.map((tab) => (
                 <button
                   key={tab.key}

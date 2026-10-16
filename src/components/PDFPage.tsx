@@ -1,8 +1,14 @@
 import React, { useEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
+import type { PageViewport } from "pdfjs-dist";
 import "pdfjs-dist/web/pdf_viewer.css";
-import { SelectionData } from "./AIPanel";
+import {
+  SourceAnchorRecord,
+  HighlightRecord,
+  PDFTextSegment,
+  PDFImageLocation,
+} from "../types/records";
 
 export interface PDFPageProps {
   /** PDF.js 文档代理对象 */
@@ -11,27 +17,43 @@ export interface PDFPageProps {
   pageNumber: number;
   /** 缩放比例 */
   scale: number;
-  /** 页面渲染完成并获取精准宽高后的回调 */
-  onPageRendered?: (pageNumber: number, width: number, height: number) => void;
-  /** 框选图片或指令选择后的回调通知 */
-  onSelect?: (data: SelectionData) => void;
+  /** 页面渲染完成并获取精准宽高与 Viewport 后的回调 */
+  onPageRendered?: (
+    pageNumber: number,
+    width: number,
+    height: number,
+    viewport: PageViewport
+  ) => void;
+  /** 框选图片裁剪完成回调 */
+  onCropCompleted?: (cropData: {
+    imageBase64: string;
+    pageNumber: number;
+    pdfRect: [number, number, number, number];
+    cssRect: { left: number; top: number; width: number; height: number };
+  }) => void;
+  /** 外部传入的历史锚点集合 */
+  anchors?: SourceAnchorRecord[];
+  /** 外部传入的高亮记录 */
+  highlights?: HighlightRecord[];
+  /** 当前激活的高亮锚点 ID */
+  activeAnchorId?: string | null;
+  /** 点击高亮锚点的回调 */
+  onSelectAnchor?: (anchorId: string) => void;
+  /** 当前文档版本标识，版本变化时不绘制旧锚点 */
+  documentRevision?: string;
 }
 
-/**
- * PDFPage: 单页“三明治架构”渲染与多模态区域框选组件
- *
- * 架构层次：
- * 1. 底层视觉 (Canvas)：page.render() 绘制高清位图与矢量视觉层
- * 2. 中层交互 (TextLayer)：DOM 文本层，绝对对齐 Canvas，字体透明、支持原生精准划词
- * 3. 顶层框选遮罩：按住 Alt 拖拽生成虚线选区框，精准裁切底层 Canvas 像素生成 Base64 发往视觉大模型
- * 4. 严格的内存生命周期：页面 unmount 时主动取消正在运行的任务并调用 page.cleanup()
- */
 export default function PDFPage({
   pdf,
   pageNumber,
   scale,
   onPageRendered,
-  onSelect,
+  onCropCompleted,
+  anchors,
+  highlights,
+  activeAnchorId,
+  onSelectAnchor,
+  documentRevision,
 }: PDFPageProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const textLayerRef = useRef<HTMLDivElement | null>(null);
@@ -40,6 +62,7 @@ export default function PDFPage({
   // 记录实际页面尺寸（像素）
   const [pageSize, setPageSize] = useState<{ width: number; height: number } | null>(null);
   const [isRendering, setIsRendering] = useState<boolean>(true);
+  const currentViewportRef = useRef<PageViewport | null>(null);
 
   // 区域框选 (Region Selection) 状态
   const [isSelecting, setIsSelecting] = useState<boolean>(false);
@@ -51,8 +74,6 @@ export default function PDFPage({
     width: number;
     height: number;
   } | null>(null);
-  const [pendingImageBase64, setPendingImageBase64] = useState<string | null>(null);
-  const [customImagePrompt, setCustomImagePrompt] = useState<string>("");
   const [isAltPressed, setIsAltPressed] = useState<boolean>(false);
 
   // 估算标准 A4 宽高（72 DPI 下默认 595 x 842 磅），未就绪时作为骨架占位
@@ -62,14 +83,10 @@ export default function PDFPage({
   // 监听全局 Alt 键状态，用于光标样式与交互提示
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === "Alt") {
-        setIsAltPressed(true);
-      }
+      if (e.key === "Alt") setIsAltPressed(true);
     };
     const handleKeyUp = (e: KeyboardEvent): void => {
-      if (e.key === "Alt") {
-        setIsAltPressed(false);
-      }
+      if (e.key === "Alt") setIsAltPressed(false);
     };
     const handleWindowBlur = (): void => {
       setIsAltPressed(false);
@@ -97,7 +114,6 @@ export default function PDFPage({
 
     async function renderPageSandwich(): Promise<void> {
       try {
-        // 1. 获取目标页 Proxy
         const page = await pdf.getPage(pageNumber);
         if (isCancelled) {
           page.cleanup();
@@ -105,15 +121,14 @@ export default function PDFPage({
         }
         activePage = page;
 
-        // 2. 计算视口尺寸与高分屏倍率
         const viewport = page.getViewport({ scale });
+        currentViewportRef.current = viewport;
         const pixelRatio = window.devicePixelRatio || 1;
         const widthPx = Math.floor(viewport.width);
         const heightPx = Math.floor(viewport.height);
 
         setPageSize({ width: widthPx, height: heightPx });
 
-        // 3. 底层 Canvas 视觉渲染
         const canvas = canvasRef.current;
         if (!canvas || isCancelled) return;
 
@@ -138,16 +153,13 @@ export default function PDFPage({
         await renderTask.promise;
         if (isCancelled) return;
 
-        // 4. 中层 TextLayer 交互文本层构建与对齐
+        // 中层 TextLayer
         const textLayerContainer = textLayerRef.current;
         if (!textLayerContainer || isCancelled) return;
 
-        // 清空旧文本节点
         textLayerContainer.innerHTML = "";
         textLayerContainer.style.width = `${widthPx}px`;
         textLayerContainer.style.height = `${heightPx}px`;
-
-        // 注入 PDF.js 核心缩放变量以实现严格几何坐标对齐
         textLayerContainer.style.setProperty("--scale-factor", `${viewport.scale}`);
         textLayerContainer.style.setProperty("--total-scale-factor", `${viewport.scale}`);
         textLayerContainer.style.setProperty("--scale-round-x", "1px");
@@ -168,7 +180,7 @@ export default function PDFPage({
         if (!isCancelled) {
           setIsRendering(false);
           if (onPageRendered) {
-            onPageRendered(pageNumber, widthPx, heightPx);
+            onPageRendered(pageNumber, widthPx, heightPx, viewport);
           }
         }
       } catch (err: unknown) {
@@ -187,7 +199,6 @@ export default function PDFPage({
 
     void renderPageSandwich();
 
-    // 关键生命周期：unmount 时彻底释放内存与不可见位图
     return () => {
       isCancelled = true;
       if (activeRenderTask) {
@@ -215,17 +226,16 @@ export default function PDFPage({
   }, [pdf, pageNumber, scale, onPageRendered]);
 
   /**
-   * 精准 Canvas 裁剪算法：
-   * 将选区 CSS 物理边界映射到底层高清 Canvas 位图像素并生成 Base64 JPEG
+   * 精准 Canvas 裁剪与 PDF 原始坐标转换
    */
   const cropCanvasRegion = (left: number, top: number, width: number, height: number): void => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const viewport = currentViewportRef.current;
+    if (!canvas || !viewport) return;
 
     const currentWidthPx = pageSize ? pageSize.width : estimatedWidth;
     const currentHeightPx = pageSize ? pageSize.height : estimatedHeight;
 
-    // 像素补偿倍率：底层高清 Canvas 物理像素与显示 CSS 像素之比
     const scaleX = canvas.width / (currentWidthPx || canvas.clientWidth || 1);
     const scaleY = canvas.height / (currentHeightPx || canvas.clientHeight || 1);
 
@@ -236,52 +246,48 @@ export default function PDFPage({
 
     if (sWidth <= 0 || sHeight <= 0) return;
 
-    // 创建离屏 Canvas，尺寸直接采用物理高清裁剪尺寸，保证 Vision AI 识别 100% 锐利
     const offscreenCanvas = document.createElement("canvas");
     offscreenCanvas.width = sWidth;
     offscreenCanvas.height = sHeight;
     const offCtx = offscreenCanvas.getContext("2d");
     if (!offCtx) return;
 
-    // 扣取目标区域
-    offCtx.drawImage(
-      canvas,
-      sx,
-      sy,
-      sWidth,
-      sHeight,
-      0,
-      0,
-      sWidth,
-      sHeight
-    );
-
+    offCtx.drawImage(canvas, sx, sy, sWidth, sHeight, 0, 0, sWidth, sHeight);
     const imageBase64 = offscreenCanvas.toDataURL("image/jpeg", 0.9);
+
+    // 将选区 CSS 物理边界映射为 72 DPI PDF 原始几何坐标
+    const [pX1, pY1] = viewport.convertToPdfPoint(left, top);
+    const [pX2, pY2] = viewport.convertToPdfPoint(left + width, top + height);
+    const pdfRect: [number, number, number, number] = [
+      Math.min(pX1, pX2),
+      Math.min(pY1, pY2),
+      Math.max(pX1, pX2),
+      Math.max(pY1, pY2),
+    ];
+
     setSelectedBox({ left, top, width, height });
-    setPendingImageBase64(imageBase64);
+
+    if (onCropCompleted) {
+      onCropCompleted({
+        imageBase64,
+        pageNumber,
+        pdfRect,
+        cssRect: { left, top, width, height },
+      });
+    }
   };
 
-  /**
-   * PointerDown: 捕获 Alt + 鼠标拖拽框选
-   */
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>): void => {
-    const target = e.target as HTMLElement;
-    // 如果已有选区菜单且点击在外部，清空选区
-    if (selectedBox && !target.closest(".image-selection-toolbar")) {
+    if (selectedBox) {
       setSelectedBox(null);
-      setPendingImageBase64(null);
-      setCustomImagePrompt("");
     }
 
     if (e.altKey) {
       e.preventDefault();
       e.stopPropagation();
 
-      // 阻止原生文字划选
       const sel = window.getSelection();
-      if (sel) {
-        sel.removeAllRanges();
-      }
+      if (sel) sel.removeAllRanges();
 
       const rect = sandwichRef.current?.getBoundingClientRect();
       if (!rect) return;
@@ -293,17 +299,11 @@ export default function PDFPage({
       setCurrentPoint({ x: startX, y: startY });
       setIsSelecting(true);
       setSelectedBox(null);
-      setPendingImageBase64(null);
-      setCustomImagePrompt("");
 
-      // 锁定指针捕获，防止光标快速划出边缘时丢失跟踪
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     }
   };
 
-  /**
-   * PointerMove: 实时更新框选矩形
-   */
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>): void => {
     if (!isSelecting || !startPoint) return;
     e.preventDefault();
@@ -317,9 +317,6 @@ export default function PDFPage({
     setCurrentPoint({ x: curX, y: curY });
   };
 
-  /**
-   * PointerUp: 结束拖拽，生成图像切片
-   */
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>): void => {
     if (!isSelecting || !startPoint || !currentPoint) {
       setIsSelecting(false);
@@ -338,7 +335,6 @@ export default function PDFPage({
     const width = Math.abs(currentPoint.x - startPoint.x);
     const height = Math.abs(currentPoint.y - startPoint.y);
 
-    // 过滤极小误触 (< 12px)
     if (width < 12 || height < 12) {
       setStartPoint(null);
       setCurrentPoint(null);
@@ -350,47 +346,86 @@ export default function PDFPage({
     setCurrentPoint(null);
   };
 
-  /**
-   * PointerCancel: 取消拖拽
-   */
   const handlePointerCancel = (): void => {
     setIsSelecting(false);
     setStartPoint(null);
     setCurrentPoint(null);
   };
 
-  /**
-   * 悬浮菜单动作触发
-   */
-  const handleImageAction = (action: string, e: React.MouseEvent): void => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    if (pendingImageBase64 && onSelect) {
-      onSelect({
-        type: "image",
-        imageBase64: pendingImageBase64,
-        action,
-      });
-    }
-
-    setSelectedBox(null);
-    setPendingImageBase64(null);
-  };
-
-  /**
-   * 手动关闭选区框
-   */
-  const handleClearBox = (e: React.MouseEvent): void => {
-    e.preventDefault();
-    e.stopPropagation();
-    setSelectedBox(null);
-    setPendingImageBase64(null);
-    setCustomImagePrompt("");
-  };
-
   const currentWidth = pageSize ? pageSize.width : estimatedWidth;
   const currentHeight = pageSize ? pageSize.height : estimatedHeight;
+  const viewport = currentViewportRef.current;
+
+  const handlePageClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    // 若当前正在划词或已选中文字，绝不触发锚点点击，确保原生文字选择完整丝滑
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.toString().trim().length > 0) {
+      return;
+    }
+    if (isSelecting) return;
+
+    const sandwich = sandwichRef.current;
+    const viewport = currentViewportRef.current;
+    if (!sandwich || !viewport) return;
+
+    const rect = sandwich.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+
+    // 命中检测：收集点击坐标命中的所有当前有效版本锚点，支持重叠来源循环切换激活
+    const hitAnchorIds: string[] = [];
+    for (const anc of anchors || []) {
+      if (documentRevision && anc.document_revision && anc.document_revision !== documentRevision) {
+        continue;
+      }
+      if (anc.source_type === "pdf_text") {
+        try {
+          const loc = JSON.parse(anc.location_json);
+          const seg = (loc.segments || []).find((s: PDFTextSegment) => s.pageNumber === pageNumber);
+          if (seg) {
+            for (const r of seg.rects) {
+              const [vx1, vy1] = viewport.convertToViewportPoint(r[0], r[1]);
+              const [vx2, vy2] = viewport.convertToViewportPoint(r[2], r[3]);
+              const minX = Math.min(vx1, vx2);
+              const maxX = Math.max(vx1, vx2);
+              const minY = Math.min(vy1, vy2);
+              const maxY = Math.max(vy1, vy2);
+              if (clickX >= minX && clickX <= maxX && clickY >= minY && clickY <= maxY) {
+                if (!hitAnchorIds.includes(anc.anchor_id)) {
+                  hitAnchorIds.push(anc.anchor_id);
+                }
+                break;
+              }
+            }
+          }
+        } catch {}
+      } else if (anc.source_type === "pdf_image") {
+        try {
+          const loc = JSON.parse(anc.location_json);
+          const imgLoc = loc.location || loc;
+          if (imgLoc.pageNumber === pageNumber) {
+            const [vx1, vy1] = viewport.convertToViewportPoint(imgLoc.rect[0], imgLoc.rect[1]);
+            const [vx2, vy2] = viewport.convertToViewportPoint(imgLoc.rect[2], imgLoc.rect[3]);
+            const minX = Math.min(vx1, vx2);
+            const maxX = Math.max(vx1, vx2);
+            const minY = Math.min(vy1, vy2);
+            const maxY = Math.max(vy1, vy2);
+            if (clickX >= minX && clickX <= maxX && clickY >= minY && clickY <= maxY) {
+              if (!hitAnchorIds.includes(anc.anchor_id)) {
+                hitAnchorIds.push(anc.anchor_id);
+              }
+            }
+          }
+        } catch {}
+      }
+    }
+
+    if (hitAnchorIds.length > 0) {
+      const activeIdx = hitAnchorIds.indexOf(activeAnchorId || "");
+      const nextIdx = activeIdx >= 0 ? (activeIdx + 1) % hitAnchorIds.length : 0;
+      onSelectAnchor?.(hitAnchorIds[nextIdx]);
+    }
+  };
 
   return (
     <article
@@ -401,12 +436,10 @@ export default function PDFPage({
       }}
       data-page-number={pageNumber}
     >
-      {/* 悬浮页码标识 */}
       <div className="pdf-page-number-indicator">
         <span>P. {pageNumber}</span>
       </div>
 
-      {/* 三明治架构容器：底层 Canvas + 中层 TextLayer + 顶层框选遮罩 */}
       <div
         ref={sandwichRef}
         className={`pdf-page-sandwich ${isAltPressed || isSelecting ? "alt-mode" : ""}`}
@@ -415,6 +448,7 @@ export default function PDFPage({
           height: `${currentHeight}px`,
           position: "relative",
         }}
+        onClick={handlePageClick}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -425,8 +459,103 @@ export default function PDFPage({
           <canvas ref={canvasRef} className="pdf-page-canvas" />
         </div>
 
-        {/* 中层：TextLayer DOM 原生文本层（透明字体 + 几何对齐） */}
+        {/* 中层：TextLayer DOM 原生文本层 */}
         <div ref={textLayerRef} className="textLayer" />
+
+        {/* 持久化高亮与来源区域渲染层 (非拦截覆盖层 pointer-events: none) */}
+        {viewport && (
+          <div
+            className="pdf-page-highlights-overlay"
+            style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 4 }}
+          >
+            {anchors?.map((anc) => {
+              // 版本不一致时不绘制旧锚点
+              if (documentRevision && anc.document_revision && anc.document_revision !== documentRevision) {
+                return null;
+              }
+
+              if (anc.source_type === "pdf_text") {
+                try {
+                  const loc = JSON.parse(anc.location_json);
+                  const segments: PDFTextSegment[] = loc.segments || [];
+                  const pageSeg = segments.find((s) => s.pageNumber === pageNumber);
+                  if (!pageSeg) return null;
+
+                  return pageSeg.rects.map((r, rIdx) => {
+                    const [vx1, vy1] = viewport.convertToViewportPoint(r[0], r[1]);
+                    const [vx2, vy2] = viewport.convertToViewportPoint(r[2], r[3]);
+                    const hlLeft = Math.min(vx1, vx2);
+                    const hlTop = Math.min(vy1, vy2);
+                    const hlW = Math.abs(vx1 - vx2);
+                    const hlH = Math.abs(vy1 - vy2);
+                    const isActive = anc.anchor_id === activeAnchorId;
+                    const matchingHl = highlights?.find((h) => h.anchor_id === anc.anchor_id);
+                    const color = matchingHl?.color || "rgba(230, 200, 70, 0.35)";
+
+                    return (
+                      <div
+                        key={`${anc.anchor_id}_${rIdx}`}
+                        data-anchor-id={anc.anchor_id}
+                        className={`pdf-text-highlight-rect ${isActive ? "is-active" : ""}`}
+                        style={{
+                          position: "absolute",
+                          left: `${hlLeft}px`,
+                          top: `${hlTop}px`,
+                          width: `${hlW}px`,
+                          height: `${hlH}px`,
+                          backgroundColor: color,
+                          pointerEvents: "none",
+                          borderRadius: "2px",
+                          borderBottom: isActive ? "2px solid var(--pen, #e8664a)" : "none",
+                        }}
+                      />
+                    );
+                  });
+                } catch {
+                  return null;
+                }
+              } else if (anc.source_type === "pdf_image") {
+                try {
+                  const loc = JSON.parse(anc.location_json);
+                  const imgLoc: PDFImageLocation = loc.location || loc;
+                  if (imgLoc.pageNumber !== pageNumber) return null;
+
+                  const [vx1, vy1] = viewport.convertToViewportPoint(imgLoc.rect[0], imgLoc.rect[1]);
+                  const [vx2, vy2] = viewport.convertToViewportPoint(imgLoc.rect[2], imgLoc.rect[3]);
+                  const bLeft = Math.min(vx1, vx2);
+                  const bTop = Math.min(vy1, vy2);
+                  const bW = Math.abs(vx1 - vx2);
+                  const bH = Math.abs(vy1 - vy2);
+                  const isActive = anc.anchor_id === activeAnchorId;
+
+                  return (
+                    <div
+                      key={anc.anchor_id}
+                      data-anchor-id={anc.anchor_id}
+                      className={`pdf-image-anchor-box ${isActive ? "is-active" : ""}`}
+                      style={{
+                        position: "absolute",
+                        left: `${bLeft}px`,
+                        top: `${bTop}px`,
+                        width: `${bW}px`,
+                        height: `${bH}px`,
+                        border: `2px dashed ${isActive ? "var(--pen, #e8664a)" : "rgba(232, 102, 74, 0.5)"}`,
+                        backgroundColor: isActive
+                          ? "rgba(232, 102, 74, 0.12)"
+                          : "rgba(232, 102, 74, 0.05)",
+                        pointerEvents: "none",
+                        borderRadius: "4px",
+                      }}
+                    />
+                  );
+                } catch {
+                  return null;
+                }
+              }
+              return null;
+            })}
+          </div>
+        )}
 
         {/* 顶层：实时拖拽选区虚线框 */}
         {isSelecting && startPoint && currentPoint && (() => {
@@ -450,7 +579,7 @@ export default function PDFPage({
           );
         })()}
 
-        {/* 选定静态选区虚线框 */}
+        {/* 选定静态框选区域 */}
         {selectedBox && !isSelecting && (
           <div
             className="selection-box"
@@ -464,82 +593,8 @@ export default function PDFPage({
             <span className="selection-box-dim">{`${Math.round(selectedBox.width)} × ${Math.round(selectedBox.height)}`}</span>
           </div>
         )}
-
-        {/* 选区浮动菜单 (Image Selection Toolbar) - 带自定义输入层与极简规范 */}
-        {selectedBox && pendingImageBase64 && (
-          <div
-            className="image-selection-toolbar"
-            style={{
-              top: `${
-                selectedBox.top + selectedBox.height + 44 > currentHeight
-                  ? Math.max(8, selectedBox.top - 46)
-                  : selectedBox.top + selectedBox.height + 10
-              }px`,
-              left: `${selectedBox.left + selectedBox.width / 2}px`,
-            }}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            {/* 正上方 100% 宽度极简自定义指令输入框 */}
-            <div className="toolbar-input-wrapper">
-              <input
-                type="text"
-                className="toolbar-custom-input"
-                placeholder="输入图像分析指令并回车..."
-                value={customImagePrompt}
-                onChange={(e) => setCustomImagePrompt(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && customImagePrompt.trim()) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (pendingImageBase64 && onSelect) {
-                      onSelect({
-                        type: "image",
-                        imageBase64: pendingImageBase64,
-                        action: "custom",
-                        customPrompt: customImagePrompt.trim(),
-                      });
-                    }
-                    setCustomImagePrompt("");
-                    setSelectedBox(null);
-                    setPendingImageBase64(null);
-                  }
-                }}
-                autoFocus
-              />
-            </div>
-
-            {/* 下方等宽快捷按钮 */}
-            <div className="toolbar-buttons-row">
-              <button
-                type="button"
-                className="image-toolbar-btn"
-                onClick={(e) => handleImageAction("analyze-chart", e)}
-                title="解析图表、电路拓扑与架构"
-              >
-                <span>解析图表</span>
-              </button>
-              <button
-                type="button"
-                className="image-toolbar-btn"
-                onClick={(e) => handleImageAction("extract-formula", e)}
-                title="精准提取公式为标准 LaTeX"
-              >
-                <span>提取公式</span>
-              </button>
-              <button
-                type="button"
-                className="image-toolbar-close-btn"
-                onClick={handleClearBox}
-                title="取消选区"
-              >
-                ×
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* 渲染未完成时的平滑骨架提示 */}
       {isRendering && (
         <div className="pdf-page-skeleton">
           <span className="pdf-skeleton-pulse" />

@@ -77,7 +77,7 @@ body,
   overflow: hidden;
 }
 
-/* 核心工作区：左右分栏 Flexbox (左侧阅读 70% + 右侧 AI 面板 30%) */
+/* 核心工作区：三栏连续共享背景 (左侧轻量 Minimap + 中间阅读区 + 可拖动分界手柄 + 右侧 AI 伴读画布) */
 .app-workspace {
   display: flex;
   flex-direction: row;
@@ -85,16 +85,155 @@ body,
   min-height: 0;
   width: 100%;
   overflow: hidden;
+  background-color: var(--bg);
+  position: relative;
 }
 
 /* ==========================================================================
-   左侧阅读区 (约 70% 宽，独立滚动，纯净无扰)
+   三栏共享背景布局：左侧轻量 Minimap 与 分栏拖动 Handle
    ========================================================================== */
-.reader-container {
-  flex: 0 0 70%;
-  width: 70%;
+
+.workspace-minimap-column {
+  flex: 0 0 68px;
+  width: 68px;
   height: 100%;
-  background-color: var(--bg-paper);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 36px 6px 36px 14px;
+  background-color: transparent;
+  user-select: none;
+  z-index: 5;
+  box-sizing: border-box;
+}
+
+.minimap-rail {
+  position: relative;
+  width: 48px;
+  height: 100%;
+  max-height: calc(100% - 24px);
+  min-height: 180px;
+  border-radius: 6px;
+  border: 1px solid var(--ln);
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  cursor: pointer;
+  touch-action: none;
+  overflow: hidden;
+  box-sizing: border-box;
+  opacity: 0.85;
+  transition: opacity 0.2s ease, border-color 0.2s ease;
+}
+
+.minimap-rail:hover {
+  opacity: 1;
+  border-color: color-mix(in srgb, var(--fg) 22%, transparent);
+}
+
+.minimap-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.minimap-anchor-marker {
+  position: absolute;
+  right: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: var(--pen, #e8664a);
+  pointer-events: none;
+  transform: translateY(-50%);
+  box-shadow: 0 0 3px var(--pen, #e8664a);
+  z-index: 2;
+}
+
+.minimap-viewport-indicator {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border: 1px solid color-mix(in srgb, var(--fg) 40%, transparent);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  border-radius: 3px;
+  pointer-events: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  z-index: 3;
+}
+
+/* 正文与右侧卡片画布之间的拖拽手柄 */
+.workspace-splitter-handle {
+  flex: 0 0 10px;
+  width: 10px;
+  margin: 0 -5px;
+  height: 100%;
+  cursor: col-resize;
+  position: relative;
+  z-index: 10;
+  touch-action: none;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  transition: background-color 0.15s ease;
+}
+
+.workspace-splitter-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  background-color: transparent; /* 普通态不显示明显通高分隔线，克制融入连续背景 */
+  box-shadow: none;
+  transition: background-color 0.15s ease, width 0.15s ease, left 0.15s ease;
+}
+
+.workspace-splitter-handle:hover::after,
+.workspace-splitter-handle:active::after {
+  background-color: var(--pen, #e8664a);
+  width: 2px;
+  left: 4px;
+}
+
+@media (max-width: 768px) {
+  .workspace-minimap-column {
+    display: none;
+  }
+}
+
+/* ==========================================================================
+   中间正文阅读区 (自适应宽度，融入共享背景，纯净无扰)
+   ========================================================================== */
+.workspace-reader-column {
+  flex: 1 1 0%;
+  min-width: 320px;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace-reader-column > .reader-container,
+.workspace-reader-column > .pdf-reader-container {
+  flex: 1 1 0%;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+}
+
+.reader-container {
+  flex: 1 1 0%;
+  min-width: 320px;
+  width: auto;
+  height: 100%;
+  background-color: transparent;
   position: relative;
   overflow: hidden;
   display: flex;
@@ -126,18 +265,20 @@ body,
   display: none;
 }
 
-/* 阅读器正文定宽居中 */
+/* 阅读器正文定宽居中，接通 --reader-w 与 --reader-f (支持用户修改字体和内容宽度) */
 .reader-content {
   width: 100%;
-  max-width: 740px;
-  padding: 40px 48px 120px;
+  max-width: var(--reader-w, 987px);
+  padding: 40px 48px 140px;
+  font-family: var(--reader-f, "Newsreader", Georgia, "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", "SimSun", serif);
+  box-sizing: border-box;
 }
 
 /* 文章头部元信息 */
 .article-header {
-  margin-bottom: 40px;
-  padding-bottom: 24px;
-  border-bottom: 1px solid var(--border-light);
+  margin-bottom: 32px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--ln, rgba(255, 255, 255, 0.08));
 }
 
 .article-tag {
@@ -154,22 +295,23 @@ body,
 }
 
 .article-title {
-  font-family: var(--font-serif);
-  font-size: 2.25rem;
-  line-height: 1.35;
-  font-weight: 700;
-  color: var(--text-main);
-  letter-spacing: -0.01em;
-  margin-bottom: 16px;
+  font-family: var(--reader-f, "Newsreader", Georgia, "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", "SimSun", serif);
+  font-size: clamp(1.75rem, 3.5vw, 2.35rem);
+  line-height: 1.3;
+  font-weight: 500; /* 减轻粗重感，符合 7gloss 的优雅书卷风格 */
+  color: var(--fg, #e8e5de);
+  letter-spacing: -0.015em;
+  margin-bottom: 12px;
 }
 
 .article-meta {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 12px;
-  font-size: 0.85rem;
-  color: var(--text-muted);
+  gap: 10px;
+  font-size: 0.82rem;
+  color: var(--mut, #85827b);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
 .hint-pill {
@@ -181,20 +323,16 @@ body,
   margin-left: auto;
 }
 
-/* 正文排版 */
-.article-body {
-  font-family: var(--font-serif);
-  font-size: 1.125rem;
-  line-height: 1.95;
-  color: var(--text-main);
+/* 正文排版：接入 --reader-f、--reader-fs 与 --reader-lh */
+.article-body,
+.virtual-article-body {
+  font-family: var(--reader-f, "Newsreader", Georgia, "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", "SimSun", serif);
+  font-size: var(--reader-fs, 19px);
+  line-height: var(--reader-lh, 1.7);
+  color: var(--fg, #e8e5de);
 }
 
-/* 虚拟滚动占位容器：禁用鼠标事件，避免极速滚动时触发子树高频计算 */
 .virtual-article-body {
-  font-family: var(--font-serif);
-  font-size: 1.125rem;
-  line-height: 1.95;
-  color: var(--text-main);
   pointer-events: none;
 }
 
@@ -896,123 +1034,122 @@ body,
 }
 
 /* ==========================================================================
-   全局底部状态栏 (Global Status Bar) - VS Code 极客深灰纯色标准 (24px)
+   正文下方悬浮提问栏 (Floating Ask Bar) - 参考 7gloss .ab 风格
    ========================================================================== */
-.global-status-bar {
-  height: 24px;
-  min-height: 24px;
-  max-height: 24px;
-  width: 100vw;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 12px;
-  background-color: #0f172a; /* Slate-900 极其克制深灰纯色底色 */
-  border-top: 1px solid #1e293b;
-  color: #94a3b8; /* Slate-400 */
-  font-family: var(--font-mono, monospace);
-  font-size: 11px;
-  user-select: none;
-  z-index: 50;
-  box-sizing: border-box;
+.reader-floating-ask-bar {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(440px, calc(100% - 32px));
+  z-index: 40;
+  pointer-events: auto;
 }
 
-.status-bar-left {
+.floating-ask-form {
   display: flex;
   align-items: center;
   gap: 8px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  padding: 6px 8px 6px 14px;
+  border-radius: 12px;
+  background-color: var(--cd, #151514);
+  border: 1px solid var(--ln, #262523);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.status-stats-text {
+.floating-ask-form.is-focused {
+  border-color: var(--pen, #e8664a);
+  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--pen, #e8664a);
+}
+
+.floating-ask-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--fg, #e8e5de);
+  font-family: inherit;
+  line-height: 1.4;
+}
+
+.floating-ask-input::placeholder {
+  color: var(--mut, #85827b);
+  opacity: 0.85;
+}
+
+.floating-ask-depth-toggle {
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: #cbd5e1; /* Slate-300 */
-  font-size: 11px;
-  letter-spacing: 0.01em;
-}
-
-.status-filename {
-  font-weight: 500;
-  color: #f1f5f9;
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.status-separator {
-  color: #475569; /* Slate-600 */
-  font-size: 10px;
-  user-select: none;
-}
-
-.status-loading-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: #38bdf8;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  padding: 2px;
   font-size: 11px;
 }
 
-.status-loading-spinner {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  border: 1.5px solid rgba(56, 189, 248, 0.2);
-  border-top-color: #38bdf8;
-  animation: pdf-spin 0.8s linear infinite;
-}
-
-.status-idle-text {
-  color: #64748b;
+.depth-toggle-btn {
+  border: none;
+  padding: 2px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--mut, #85827b);
   font-size: 11px;
+  transition: background 0.1s ease, color 0.1s ease;
 }
 
-.status-error-text {
-  color: #f87171;
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.status-bar-center {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.status-badge-text {
-  color: #94a3b8;
-  font-size: 11px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.status-badge-text .check-icon {
-  color: #38bdf8;
+.depth-toggle-btn.is-active {
+  background: var(--cd, #151514);
+  color: var(--fg, #e8e5de);
   font-weight: 600;
-  font-size: 11px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
-.status-bar-right {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+.floating-ask-submit-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: none;
+  background-color: var(--pen, #e8664a);
+  color: #ffffff;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: bold;
+  transition: opacity 0.15s ease, transform 0.1s ease;
 }
 
-.status-zoom-percentage {
-  color: #e2e8f0;
+.floating-ask-submit-btn:hover:not(:disabled) {
+  transform: scale(1.05);
+}
+
+.floating-ask-submit-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.floating-ask-kbd-hint {
+  position: absolute;
+  right: 50px;
+  font-size: 10px;
+  color: var(--mut, #85827b);
+  border: 1px solid var(--ln, #262523);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 1px 5px;
+  border-radius: 3px;
+  pointer-events: none;
   font-family: var(--font-mono, monospace);
+}
+
+.menu-zoom-tag {
   font-size: 11px;
-  padding: 1px 8px;
-  background-color: rgba(255, 255, 255, 0.08);
-  border-radius: 2px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  letter-spacing: 0.02em;
+  font-family: var(--font-mono, monospace);
+  color: var(--pen, #e8664a);
+  background-color: rgba(232, 102, 74, 0.08);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(232, 102, 74, 0.2);
   user-select: none;
   cursor: default;
 }
@@ -1165,6 +1302,12 @@ body,
 
 .menu-dropdown-item:active {
   background-color: #e2e8f0;
+}
+
+.menu-dropdown-item.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .menu-shortcut-hint {
@@ -2238,10 +2381,270 @@ body,
   font-weight: 600;
   margin-right: 8px;
 }
-
 .explorer-tip-text {
   color: #94a3b8;
 }
 
+/* ==========================================================================
+   Gloss Minimalist Themes & Companion Card System
+   ========================================================================== */
 
+:root {
+  --pen: #e8664a;
+  --hlc: rgba(230, 200, 70, 0.4);
+  --bg: #ffffff;
+  --fg: #0f172a;
+  --mut: #85827b;
+  --ln: #e2e8f0;
+  --cd: #ffffff;
+  --reader-fs: 18px;
+  --reader-lh: 1.7;
+  --reader-w: 987px;
+  --card-fs: 13px;
+}
 
+[data-theme="paper"] {
+  --bg: #f4f3ef;
+  --fg: #1d1c1a;
+  --mut: #8b8982;
+  --ln: #e0ded7;
+  --cd: #faf9f6;
+  --bg-paper: #f4f3ef;
+  --bg-subtle: #eeece6;
+  --bg-sidebar: #faf9f6;
+  --bg-card: #faf9f6;
+  --text-main: #1d1c1a;
+  --text-secondary: #5a5752;
+  --text-muted: #8b8982;
+  --border-light: #e0ded7;
+}
+
+[data-theme="sepia"] {
+  --bg: #efe6d2;
+  --fg: #3b3226;
+  --mut: #8a7c66;
+  --ln: #ddd0b6;
+  --cd: #f4ecd9;
+  --bg-paper: #efe6d2;
+  --bg-subtle: #e6dac1;
+  --bg-sidebar: #f4ecd9;
+  --bg-card: #f4ecd9;
+  --text-main: #3b3226;
+  --text-secondary: #6e604f;
+  --text-muted: #8a7c66;
+  --border-light: #ddd0b6;
+}
+
+[data-theme="snow"] {
+  --bg: #ffffff;
+  --fg: #161616;
+  --mut: #8a8a8a;
+  --ln: #e8e8e8;
+  --cd: #fafafa;
+  --bg-paper: #ffffff;
+  --bg-subtle: #f5f5f5;
+  --bg-sidebar: #fafafa;
+  --bg-card: #ffffff;
+  --text-main: #161616;
+  --text-secondary: #555555;
+  --text-muted: #8a8a8a;
+  --border-light: #e8e8e8;
+}
+
+[data-theme="night"] {
+  --bg: #0d0d0c;
+  --fg: #e8e5de;
+  --mut: #85827b;
+  --ln: #262523;
+  --cd: #151514;
+  --bg-paper: #0d0d0c;
+  --bg-subtle: #181816;
+  --bg-sidebar: #151514;
+  --bg-card: #151514;
+  --text-main: #e8e5de;
+  --text-secondary: #b0ada6;
+  --text-muted: #85827b;
+  --border-light: #262523;
+}
+
+[data-theme="ink"] {
+  --bg: #050507;
+  --fg: #d9dbe6;
+  --mut: #6f7285;
+  --ln: #1a1b24;
+  --cd: #0b0c12;
+  --bg-paper: #050507;
+  --bg-subtle: #0f1018;
+  --bg-sidebar: #0b0c12;
+  --bg-card: #0b0c12;
+  --text-main: #d9dbe6;
+  --text-secondary: #a4a7bc;
+  --text-muted: #6f7285;
+  --border-light: #1a1b24;
+}
+
+.selection-tb-btn {
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--fg, #0f172a);
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  white-space: nowrap;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.selection-tb-btn:hover {
+  background-color: var(--bg-hover, #f1f5f9);
+}
+
+.card-icon-btn:hover {
+  color: var(--pen, #e8664a) !important;
+}
+
+.companion-card {
+  box-sizing: border-box;
+}
+
+.companion-card:hover:not(.is-active) {
+  opacity: 0.98 !important;
+  border-color: color-mix(in srgb, var(--ln) 70%, var(--pen)) !important;
+}
+
+@keyframes modalFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.al-j .virtual-paragraph-item p {
+  text-align: justify !important;
+}
+
+.pg-i .virtual-paragraph-item p {
+  text-indent: 2em !important;
+  margin-bottom: 0.4em !important;
+}
+
+.reader-text-highlight {
+  color: inherit;
+  border-radius: 2px;
+  transition: background-color 0.15s ease;
+}
+
+.reader-text-highlight.is-active {
+  outline: 1.5px solid var(--pen, #e8664a);
+  outline-offset: 1px;
+}
+
+.pdf-text-highlight-rect.is-active,
+.pdf-image-anchor-box.is-active {
+  box-shadow: 0 0 0 2px var(--pen, #e8664a);
+}
+
+/* ========================================================
+   完整回答详情大窗 (Full Answer Modal) - 横向 16:10 规格
+   ======================================================== */
+.full-answer-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background-color: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  box-sizing: border-box;
+}
+
+.full-answer-modal-card {
+  /*
+   * 正常桌面空间核心尺寸计算：
+   * 1. 目标基准：横向 16:10 平板外观，例如 960px × 600px。
+   * 2. 宽度受三项共同约束：
+   *    - 最大设计基准宽：960px
+   *    - 可用视口宽度上限：92vw
+   *    - 受可用视口高约束时的等比宽度：calc(88vh * 16 / 10)
+   * 3. 纵横比：aspect-ratio: 16 / 10，配合 height: auto，保证高度随宽度以 16:10 严格换算。
+   * 4. 边界保护：max-width: 92vw，max-height: 88vh。
+   * 5. 最小可用高度：min-height: min(420px, 88vh)，当视口狭窄时自动放宽横向比例，优先保证阅读区与追问栏的操作可用性。
+   */
+  width: min(960px, 92vw, calc(88vh * 16 / 10));
+  aspect-ratio: 16 / 10;
+  height: auto;
+  max-width: 92vw;
+  max-height: 88vh;
+  min-height: min(420px, 88vh);
+
+  display: flex;
+  flex-direction: column;
+  background-color: var(--cd, #ffffff);
+  border: 1px solid var(--ln, #e2e8f0);
+  border-radius: 16px;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.45);
+  color: var(--fg, #0f172a);
+  overflow: hidden;
+  animation: modalFadeIn 0.2s ease-out;
+  box-sizing: border-box;
+}
+
+/* 响应式放宽规则：小窗口 / 窄屏 (< 680px) 优先保证内容阅读与输入可达 */
+@media (max-width: 680px) {
+  .full-answer-modal-overlay {
+    padding: 12px 8px;
+  }
+
+  .full-answer-modal-card {
+    width: 94vw;
+    max-width: 94vw;
+    height: min(84vh, 600px);
+    max-height: 88vh;
+    min-height: min(380px, 84vh);
+    aspect-ratio: auto;
+    border-radius: 12px;
+  }
+
+  .full-answer-modal-card header {
+    padding: 12px 14px !important;
+  }
+
+  .full-answer-modal-card footer {
+    padding: 10px 14px !important;
+  }
+}
+
+/* 响应式放宽规则：低高矮屏 (高度 < 500px) 压缩内边距并等比自适应 */
+@media (max-height: 500px) {
+  .full-answer-modal-overlay {
+    padding: 8px;
+  }
+
+  .full-answer-modal-card {
+    width: min(96vw, calc(90vh * 16 / 10));
+    height: 90vh;
+    max-height: 92vh;
+    min-height: auto;
+    aspect-ratio: auto;
+  }
+
+  .full-answer-modal-card header {
+    padding: 8px 14px !important;
+  }
+
+  .full-answer-modal-card footer {
+    padding: 8px 14px !important;
+  }
+}

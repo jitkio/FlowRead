@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+cases.local.json
+node_modules/
+output/
+dist/
+*.log
+.coverage
+htmlcov/

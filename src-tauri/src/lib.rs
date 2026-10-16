@@ -96,9 +96,11 @@ fn read_local_file(file_path: String) -> Result<String, String> {
 #[derive(serde::Serialize)]
 pub struct FileMetadata {
     pub size: u64,
+    pub mtime: u64,
+    pub revision: String,
 }
 
-/// 快速获取文件元数据（仅读取文件大小，不读取文件内容），耗时微秒级
+/// 快速获取文件元数据（仅读取文件大小与修改时间，不读取文件内容），耗时微秒级
 #[tauri::command]
 fn get_file_metadata(path: String) -> Result<FileMetadata, String> {
     let metadata = fs::metadata(&path)
@@ -108,8 +110,19 @@ fn get_file_metadata(path: String) -> Result<FileMetadata, String> {
         return Err(format!("指定路径不是有效的文件: {}", path));
     }
 
+    let size = metadata.len();
+    let mtime = metadata
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let revision = format!("{}-{}", size, mtime);
+
     Ok(FileMetadata {
-        size: metadata.len(),
+        size,
+        mtime,
+        revision,
     })
 }
 
@@ -145,16 +158,56 @@ fn read_file_chunk(path: String, start: u64, end: u64) -> Result<Vec<u8>, String
     Ok(buffer)
 }
 
+mod db;
+use db::*;
+mod parsed_preview;
+use parsed_preview::*;
+use tauri::Manager;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .setup(|app| {
+            let db_state = db::init_db(app.handle())?;
+            app.manage(db_state);
+            let preview_state = parsed_preview::ParsedPreviewState::new();
+            app.manage(preview_state);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             read_local_file,
             get_file_metadata,
-            read_file_chunk
+            read_file_chunk,
+            parsed_preview_open,
+            parsed_preview_read_asset,
+            parsed_preview_close,
+            db_get_or_create_document,
+            db_save_reading_position,
+            db_save_reading_preferences,
+            db_get_reading_preferences,
+            db_save_asset,
+            db_get_asset,
+            db_get_asset_data,
+            db_create_anchor,
+            db_get_anchors,
+            db_create_card,
+            db_update_card_stream,
+            db_create_card_turn,
+            db_update_card_turn_stream,
+            db_save_card_turn,
+            db_allocate_function_version,
+            db_save_function_result,
+            db_get_cards,
+            db_get_cards_by_anchor_ids,
+            db_get_card_detail,
+            db_delete_card,
+            db_create_highlight,
+            db_get_highlights,
+            db_delete_highlight,
+            db_export_document_markdown,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

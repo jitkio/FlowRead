@@ -39,6 +39,27 @@ export default function ModelConfigModal({
 
   const saveTimerRef = useRef<number | null>(null);
 
+  // 始终保持最新表单与配置引用，避免快捷键监听（如 Esc）及异步流程捕获旧闭包
+  const latestStateRef = useRef({
+    profiles,
+    activeProfileId,
+    selectedProfileId,
+    formProfileName,
+    formBaseUrl,
+    formApiKey,
+    formModelName,
+  });
+
+  latestStateRef.current = {
+    profiles,
+    activeProfileId,
+    selectedProfileId,
+    formProfileName,
+    formBaseUrl,
+    formApiKey,
+    formModelName,
+  };
+
   // 初始化与打开时同步
   useEffect(() => {
     if (isOpen) {
@@ -63,18 +84,6 @@ export default function ModelConfigModal({
     }
   }, [isOpen]);
 
-  // 监听 Esc 快捷键关闭
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") {
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
-
   // 显示临时保存状态
   const flashSaveStatus = (msg: string): void => {
     setSaveStatusText(msg);
@@ -88,50 +97,70 @@ export default function ModelConfigModal({
 
   /**
    * 将当前表单的编辑内容持久化至状态与 localStorage
+   * setProfiles 保持纯计算，绝不在其内部执行持久化与外部通知等副作用
    */
   const commitCurrentForm = useCallback(
-    (targetId = selectedProfileId): void => {
-      if (!targetId) return;
+    (targetId?: string): ModelProfile[] => {
+      const current = latestStateRef.current;
+      const idToCommit = targetId || current.selectedProfileId;
+      if (!idToCommit) return current.profiles;
 
-      setProfiles((prevProfiles) => {
-        const next = prevProfiles.map((p) => {
-          if (p.id === targetId) {
-            return {
-              ...p,
-              profileName: formProfileName.trim() || p.profileName,
-              baseUrl: formBaseUrl.trim(),
-              apiKey: formApiKey.trim(),
-              modelName: formModelName.trim(),
-            };
-          }
-          return p;
-        });
-
-        saveModelProfiles(next);
-
-        // 如果保存的是当前活跃生效的 Profile，同步通知外部
-        if (targetId === activeProfileId) {
-          const updatedActive = next.find((p) => p.id === targetId);
-          if (updatedActive) {
-            onActiveProfileChange?.(updatedActive);
-            onSave?.(updatedActive);
-          }
+      const nextProfiles = current.profiles.map((p) => {
+        if (p.id === idToCommit) {
+          return {
+            ...p,
+            profileName: current.formProfileName.trim() || p.profileName,
+            baseUrl: current.formBaseUrl.trim(),
+            apiKey: current.formApiKey.trim(),
+            modelName: current.formModelName.trim(),
+          };
         }
-
-        return next;
+        return p;
       });
+
+      // 1. 纯计算状态更新
+      setProfiles(nextProfiles);
+
+      // 2. 副作用移出：持久化存储
+      saveModelProfiles(nextProfiles);
+      latestStateRef.current.profiles = nextProfiles;
+
+      // 3. 如果保存的是当前活跃生效的 Profile，同步通知外部父组件
+      if (idToCommit === current.activeProfileId) {
+        const updatedActive = nextProfiles.find((p) => p.id === idToCommit);
+        if (updatedActive) {
+          onActiveProfileChange?.(updatedActive);
+          onSave?.(updatedActive);
+        }
+      }
+
       flashSaveStatus("✓ 已保存");
+      return nextProfiles;
     },
-    [selectedProfileId, formProfileName, formBaseUrl, formApiKey, formModelName, activeProfileId, onActiveProfileChange, onSave]
+    [onActiveProfileChange, onSave]
   );
+
+  // 监听 Esc 快捷键关闭（提交当前输入后关闭，使用最新状态引用避免旧闭包）
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        commitCurrentForm(latestStateRef.current.selectedProfileId);
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose, commitCurrentForm]);
 
   /**
    * 切换左侧列表选中的 Profile
    */
   const handleSelectProfile = (profile: ModelProfile): void => {
-    if (profile.id === selectedProfileId) return;
+    if (profile.id === latestStateRef.current.selectedProfileId) return;
     // 切换前自动保存旧表单内容
-    commitCurrentForm(selectedProfileId);
+    commitCurrentForm(latestStateRef.current.selectedProfileId);
 
     // 载入新选中项的数据
     setSelectedProfileId(profile.id);
@@ -144,17 +173,21 @@ export default function ModelConfigModal({
 
   /**
    * 切换活跃生效的 Profile (通过 Radio 单选框或“设为生效”按钮)
+   * 确保提交编辑、切换生效模型、同步父组件使用同一份最新配置
    */
   const handleSetActive = (id: string, e?: React.MouseEvent | React.ChangeEvent): void => {
     if (e) {
       e.stopPropagation();
     }
-    commitCurrentForm(selectedProfileId);
+    // 先提交当前表单修改，获得同一份统一的最新配置数组
+    const committedProfiles = commitCurrentForm(latestStateRef.current.selectedProfileId);
 
     setActiveProfileId(id);
     saveActiveProfileId(id);
+    latestStateRef.current.activeProfileId = id;
 
-    const target = profiles.find((p) => p.id === id);
+    // 从同一份最新配置中寻找目标项并同步通知父组件
+    const target = committedProfiles.find((p) => p.id === id);
     if (target) {
       onActiveProfileChange?.(target);
       onSave?.(target);
@@ -166,16 +199,17 @@ export default function ModelConfigModal({
    * 添加新配置项 (最多 5 个)
    */
   const handleAddProfile = (): void => {
-    if (profiles.length >= MAX_MODEL_PROFILES) return;
+    if (latestStateRef.current.profiles.length >= MAX_MODEL_PROFILES) return;
     // 先提交当前表单
-    commitCurrentForm(selectedProfileId);
+    const committedProfiles = commitCurrentForm(latestStateRef.current.selectedProfileId);
 
-    const newProfile = createNewModelProfile(profiles);
+    const newProfile = createNewModelProfile(committedProfiles);
     if (!newProfile) return;
 
-    const nextProfiles = [...profiles, newProfile];
+    const nextProfiles = [...committedProfiles, newProfile];
     setProfiles(nextProfiles);
     saveModelProfiles(nextProfiles);
+    latestStateRef.current.profiles = nextProfiles;
 
     // 选中新配置项
     setSelectedProfileId(newProfile.id);
@@ -192,27 +226,30 @@ export default function ModelConfigModal({
    */
   const handleDeleteProfile = (id: string, e: React.MouseEvent): void => {
     e.stopPropagation();
-    if (profiles.length <= 1) {
+    const current = latestStateRef.current;
+    if (current.profiles.length <= 1) {
       alert("请至少保留一个模型配置项。");
       return;
     }
 
-    const nextProfiles = profiles.filter((p) => p.id !== id);
+    const nextProfiles = current.profiles.filter((p) => p.id !== id);
     setProfiles(nextProfiles);
     saveModelProfiles(nextProfiles);
+    latestStateRef.current.profiles = nextProfiles;
 
     // 如果删除的是当前活跃项，重置活跃项为列表第一项
-    let newActiveId = activeProfileId;
-    if (activeProfileId === id) {
+    let newActiveId = current.activeProfileId;
+    if (current.activeProfileId === id) {
       newActiveId = nextProfiles[0].id;
       setActiveProfileId(newActiveId);
       saveActiveProfileId(newActiveId);
+      latestStateRef.current.activeProfileId = newActiveId;
       onActiveProfileChange?.(nextProfiles[0]);
       onSave?.(nextProfiles[0]);
     }
 
     // 如果删除的是当前查看的项，更新查看项为第一项
-    if (selectedProfileId === id) {
+    if (current.selectedProfileId === id) {
       const fallback = nextProfiles[0];
       setSelectedProfileId(fallback.id);
       setFormProfileName(fallback.profileName);
@@ -232,7 +269,7 @@ export default function ModelConfigModal({
 
   return (
     <div className="settings-modal-overlay" onClick={() => {
-      commitCurrentForm(selectedProfileId);
+      commitCurrentForm(latestStateRef.current.selectedProfileId);
       onClose();
     }}>
       <div
@@ -253,7 +290,7 @@ export default function ModelConfigModal({
             type="button"
             className="settings-modal-close-btn"
             onClick={() => {
-              commitCurrentForm(selectedProfileId);
+              commitCurrentForm(latestStateRef.current.selectedProfileId);
               onClose();
             }}
             title="关闭窗口 (Esc)"

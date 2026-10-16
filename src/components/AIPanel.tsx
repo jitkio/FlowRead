@@ -180,7 +180,7 @@ export function AIResponseRenderer({
 export default function AIPanel({
   selectionData,
   onClearSelection: _onClearSelection,
-  aiConfig: _propAiConfig,
+  aiConfig: propAiConfig,
   promptConfig: propPromptConfig,
 }: AIPanelProps): React.JSX.Element {
   // 流式输出累加内容
@@ -190,7 +190,15 @@ export default function AIPanel({
   // 错误信息
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // 用于在切换划词或清空时中断上一次未完成的请求
+  // 始终同步最新配置引用，确保下一次主动发起的请求使用最新配置，且配置更新不会触发旧请求重发
+  const promptConfigRef = useRef(propPromptConfig);
+  promptConfigRef.current = propPromptConfig;
+
+  const aiConfigRef = useRef(propAiConfig);
+  aiConfigRef.current = propAiConfig;
+
+  // 请求序列号与中止控制器 Ref，用于精准解决快速切换选区或清空时的竞态问题
+  const requestIdRef = useRef<number>(0);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   /**
@@ -198,6 +206,8 @@ export default function AIPanel({
    * 实时读取 AIConfig 与 PromptConfig，支持自定义 Prompt 注入与多模态切片请求
    */
   const fetchSSE = useCallback(async (data: SelectionData): Promise<void> => {
+    const currentRequestId = ++requestIdRef.current;
+
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -209,17 +219,19 @@ export default function AIPanel({
     setAiResponse("");
     setErrorMessage(null);
 
-    // 动态从 localStorage 中读取活跃配置 (FLOWREAD_ACTIVE_PROFILE_ID & FLOWREAD_MODEL_PROFILES)
+    // 统一以持久化活跃配置为准读取生效模型，确保与界面生效模型及持久化活跃 ID 绝对一致
     const activeProfile = getActiveModelProfile();
-    const pConfig = propPromptConfig || loadPromptConfig();
+    const pConfig = promptConfigRef.current || loadPromptConfig();
     const apiKey = activeProfile.apiKey.trim();
     const baseUrl = activeProfile.baseUrl.trim() || "https://api.deepseek.com/chat/completions";
     const modelName = activeProfile.modelName.trim() || "deepseek-chat";
 
     // 拦截器：如果检测到 apiKey 为空，立即中断请求并给用户提示
     if (!apiKey) {
-      setIsGenerating(false);
-      setAiResponse("请先前往 [工具 -> 模型配置] 完善您的 API 密钥");
+      if (requestIdRef.current === currentRequestId) {
+        setIsGenerating(false);
+        setAiResponse("请先前往 [工具 -> 模型配置] 完善您的 API 密钥");
+      }
       return;
     }
 
@@ -315,8 +327,13 @@ export default function AIPanel({
 
       const decoder = new TextDecoder("utf-8");
       let buffer = "";
+      let streamDone = false;
 
       while (true) {
+        if (controller.signal.aborted || requestIdRef.current !== currentRequestId) {
+          break;
+        }
+
         const { done, value } = await reader.read();
         if (done) break;
 
@@ -330,21 +347,35 @@ export default function AIPanel({
 
           const dataPayload = trimmed.replace(/^data:\s*/, "");
           if (dataPayload === "[DONE]") {
+            streamDone = true;
             break;
           }
 
           try {
             const parsed = JSON.parse(dataPayload);
             const deltaContent = parsed.choices?.[0]?.delta?.content;
-            if (deltaContent) {
+            if (deltaContent && requestIdRef.current === currentRequestId) {
               setAiResponse((prev) => prev + deltaContent);
             }
           } catch {
             // 忽略未接收完全的片段，继续缓冲读取
           }
         }
+
+        if (streamDone) {
+          try {
+            await reader.cancel();
+          } catch {
+            // 忽略取消异常
+          }
+          break;
+        }
       }
     } catch (err: unknown) {
+      // 若当前请求已被后续请求废弃，则绝不修改组件状态
+      if (requestIdRef.current !== currentRequestId) {
+        return;
+      }
       if (err instanceof Error) {
         if (err.name === "AbortError") {
           console.log("[FlowRead AI] 上一次请求已被主动取消");
@@ -355,7 +386,10 @@ export default function AIPanel({
         setErrorMessage(String(err));
       }
     } finally {
-      setIsGenerating(false);
+      // 仅当当前请求仍是最新发起的请求时，才重置生成中状态
+      if (requestIdRef.current === currentRequestId) {
+        setIsGenerating(false);
+      }
     }
   }, []);
 
@@ -371,8 +405,10 @@ export default function AIPanel({
     if (hasValidSelection && selectionData) {
       fetchSSE(selectionData);
     } else {
+      requestIdRef.current++;
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
+        abortControllerRef.current = null;
       }
       setAiResponse("");
       setIsGenerating(false);
@@ -380,8 +416,10 @@ export default function AIPanel({
     }
 
     return () => {
+      requestIdRef.current++;
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
+        abortControllerRef.current = null;
       }
     };
   }, [selectionData, fetchSSE]);

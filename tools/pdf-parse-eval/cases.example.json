@@ -1,0 +1,23 @@
+[
+  {
+    "case_id": "sample-doc-01",
+    "pdf_path": "D:\\path\\to\\your\\sample_document.pdf",
+    "pages": [1, 2, 3],
+    "tags": ["chinese", "digital", "two-column", "formula"],
+    "notes": "典型双栏中文论文，包含行内与行间数学公式，页码从 1 开始计数"
+  },
+  {
+    "case_id": "sample-scanned-table-02",
+    "pdf_path": "D:\\path\\to\\your\\scanned_report.pdf",
+    "pages": [12, 13],
+    "tags": ["chinese", "scanned", "table", "merged-cells"],
+    "notes": "中文扫描件，跨页复杂表格与合并单元格"
+  },
+  {
+    "case_id": "sample-circuit-diag-03",
+    "pdf_path": "D:\\path\\to\\your\\schematic_manual.pdf",
+    "pages": [45, 46],
+    "tags": ["circuit-diagram", "caption", "illustration"],
+    "notes": "包含电路原理图与图注的工程手册样本"
+  }
+]

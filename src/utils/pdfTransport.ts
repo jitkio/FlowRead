@@ -17,11 +17,18 @@ export class TauriPDFDataRangeTransport extends PDFDataRangeTransport {
   private isAborted = false;
   // 记录正在飞行的请求，避免重复拉取重叠或同一区间
   private readonly activeRequests = new Map<string, Promise<void>>();
+  public onDataError?: (error: Error) => void;
 
-  constructor(filePath: string, length: number, initialData: Uint8Array | null = null) {
+  constructor(
+    filePath: string,
+    length: number,
+    initialData: Uint8Array | null = null,
+    onDataError?: (error: Error) => void
+  ) {
     // 关键参数 progressiveDone = true: 明确通知 PDF.js 顺序流传输已终结，后续全部依靠 Range Request 驱动
     super(length, initialData, true);
     this.filePath = filePath;
+    this.onDataError = onDataError;
   }
 
   /**
@@ -61,6 +68,14 @@ export class TauriPDFDataRangeTransport extends PDFDataRangeTransport {
             ? new Uint8Array(rawResult)
             : new Uint8Array(rawResult);
 
+        // 校验实际数据块长度：空块或不足预期长度进入现有错误处理，不能让 PDF.js 持续等待
+        const expectedLength = Math.max(0, Math.min(end, this.length) - begin);
+        if (expectedLength <= 0 || chunk.byteLength < expectedLength) {
+          throw new Error(
+            `切片 [${begin}, ${end}) 数据不足预期长度: 预期 ${expectedLength} 字节，实际获得 ${chunk.byteLength} 字节`
+          );
+        }
+
         // 回调 PDF.js，喂入指定 [begin, end) 的二进制数据
         this.onDataRange(begin, chunk);
       } catch (error) {
@@ -69,6 +84,9 @@ export class TauriPDFDataRangeTransport extends PDFDataRangeTransport {
             `[TauriPDFDataRangeTransport] 读取区间 [${begin}, ${end}) 失败:`,
             error
           );
+          const err = error instanceof Error ? error : new Error(String(error));
+          this.abort();
+          this.onDataError?.(err);
         }
       } finally {
         this.activeRequests.delete(requestKey);
@@ -100,10 +118,12 @@ export class TauriPDFDataRangeTransport extends PDFDataRangeTransport {
  *
  * @param filePath 本地 PDF 文件绝对路径
  * @param initialChunkSize 初始块大小，默认 65536 字节（64KB）
+ * @param onDataError 范围请求异常回调
  */
 export async function createTauriPDFTransport(
   filePath: string,
-  initialChunkSize: number = 65536
+  initialChunkSize: number = 65536,
+  onDataError?: (error: Error) => void
 ): Promise<TauriPDFDataRangeTransport> {
   // 1. 获取文件元数据（仅读取总字节大小，不读盘）
   const metadata = await invoke<FileMetadata>("get_file_metadata", {
@@ -132,7 +152,14 @@ export async function createTauriPDFTransport(
         : rawChunk instanceof ArrayBuffer
         ? new Uint8Array(rawChunk)
         : new Uint8Array(rawChunk);
+
+    // 校验初始读取的数据块长度，若不足预期长度则抛出错误进入现有异常处理
+    if (!initialData || initialData.byteLength < firstChunkEnd) {
+      throw new Error(
+        `初始数据读取不完整: 预期 ${firstChunkEnd} 字节，实际仅获得 ${initialData?.byteLength ?? 0} 字节`
+      );
+    }
   }
 
-  return new TauriPDFDataRangeTransport(filePath, totalLength, initialData);
+  return new TauriPDFDataRangeTransport(filePath, totalLength, initialData, onDataError);
 }

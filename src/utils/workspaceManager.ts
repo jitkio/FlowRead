@@ -54,6 +54,7 @@ export const DEFAULT_WORKSPACE_NODES: WorkspaceNode[] = [
     type: "file",
     parentId: "folder_default",
     fileMeta: {
+      path: "flowread://default_reading_intro",
       extension: "txt",
       sizeBytes: 12400,
     },
@@ -92,13 +93,25 @@ export const DEFAULT_WORKSPACE_NODES: WorkspaceNode[] = [
 export function loadWorkspaceNodes(): WorkspaceNode[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
+    if (raw === null) {
       saveWorkspaceNodes(DEFAULT_WORKSPACE_NODES);
       return DEFAULT_WORKSPACE_NODES;
     }
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      return parsed;
+    if (Array.isArray(parsed)) {
+      return parsed.map((n) => {
+        if ((n.id === "file_sample_txt" || n.name?.includes("在流动中沉思")) && !n.fileMeta?.path) {
+          return {
+            ...n,
+            fileMeta: {
+              ...n.fileMeta,
+              path: "flowread://default_reading_intro",
+              extension: "txt",
+            },
+          };
+        }
+        return n;
+      });
     }
     return DEFAULT_WORKSPACE_NODES;
   } catch (err) {

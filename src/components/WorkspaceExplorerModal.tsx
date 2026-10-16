@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
 import {
   WorkspaceNode,
   formatFileSize,
@@ -10,7 +11,7 @@ import {
 export interface WorkspaceExplorerModalProps {
   isOpen: boolean;
   nodes: WorkspaceNode[];
-  onSaveNodes: (nodes: WorkspaceNode[]) => void;
+  onSaveNodes: (nodes: WorkspaceNode[] | ((prev: WorkspaceNode[]) => WorkspaceNode[])) => void;
   onClose: () => void;
   onOpenFile: (filePath?: string, extension?: string, name?: string) => void;
   initialFolderId?: string | null;
@@ -51,19 +52,18 @@ export default function WorkspaceExplorerModal({
     }
   }, [isOpen, initialFolderId]);
 
-  // 监听 Esc 快捷键关闭
+  // 监听 Esc 快捷键关闭（优先关闭弹窗并停止冒泡）
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent): void => {
       if (e.key === "Escape") {
+        e.stopPropagation();
         onClose();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
-
-  if (!isOpen) return null;
 
   // 当前文件夹节点
   const currentFolder = nodes.find((n) => n.id === currentFolderId && n.type === "folder");
@@ -97,6 +97,9 @@ export default function WorkspaceExplorerModal({
     });
   }, [nodes, currentFolderId, searchQuery]);
 
+  // 严格在所有 Hook 执行完毕后进行早退判断，避免 Hook 调用数量变化
+  if (!isOpen) return null;
+
   // 选中的节点对象
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
 
@@ -121,7 +124,11 @@ export default function WorkspaceExplorerModal({
       setSelectedNodeId(null);
       setSearchQuery("");
     } else {
-      onOpenFile(item.fileMeta?.path, item.fileMeta?.extension, item.name);
+      let filePath = item.fileMeta?.path;
+      if (!filePath && (item.id === "file_sample_txt" || item.name.includes("在流动中沉思"))) {
+        filePath = "flowread://default_reading_intro";
+      }
+      onOpenFile(filePath, item.fileMeta?.extension, item.name);
       onClose();
     }
   };
@@ -146,7 +153,7 @@ export default function WorkspaceExplorerModal({
       updatedAt: Date.now(),
     };
 
-    onSaveNodes([...nodes, newNode]);
+    onSaveNodes((prev) => [...prev, newNode]);
     setNewFolderName("");
     setIsCreatingFolder(false);
     setSelectedNodeId(newNode.id);
@@ -176,6 +183,14 @@ export default function WorkspaceExplorerModal({
       const fileName = filePath.split(/[/\\]/).pop() || "未命名文档";
       const ext = fileName.split(".").pop()?.toLowerCase() || "txt";
 
+      let sizeBytes = 0;
+      try {
+        const meta = await invoke<{ size: number }>("get_file_metadata", { path: filePath });
+        sizeBytes = meta.size;
+      } catch (err) {
+        console.warn("[WorkspaceExplorer] 获取文件大小失败:", err);
+      }
+
       const newFileNode: WorkspaceNode = {
         id: `file_${Date.now()}`,
         name: fileName,
@@ -184,13 +199,13 @@ export default function WorkspaceExplorerModal({
         fileMeta: {
           path: filePath,
           extension: ext,
-          sizeBytes: 1024 * 1024 * 2, // 初始预估或由 Rust 加载时更新
+          sizeBytes,
         },
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
 
-      onSaveNodes([...nodes, newFileNode]);
+      onSaveNodes((prev) => [...prev, newFileNode]);
       setSelectedNodeId(newFileNode.id);
     } catch (err) {
       console.error("[WorkspaceExplorer] 导入本地文件失败:", err);
@@ -202,7 +217,11 @@ export default function WorkspaceExplorerModal({
    */
   const handleDeleteSelected = (): void => {
     if (!selectedNode) return;
-    const confirmed = window.confirm(`确定要彻底删除项目「${selectedNode.name}」吗？${selectedNode.type === "folder" ? "其内部所有文件都将被移除！" : ""}`);
+    const confirmed = window.confirm(
+      `确定要从工作区移除「${selectedNode.name}」吗？（仅移除工作区登记，不会删除磁盘上的原始文件${
+        selectedNode.type === "folder" ? "；文件夹内所有登记也将一并移除" : ""
+      }）`
+    );
     if (!confirmed) return;
 
     const idsToRemove = new Set<string>([selectedNode.id]);
@@ -211,8 +230,7 @@ export default function WorkspaceExplorerModal({
       descIds.forEach((id) => idsToRemove.add(id));
     }
 
-    const updated = nodes.filter((n) => !idsToRemove.has(n.id));
-    onSaveNodes(updated);
+    onSaveNodes((prev) => prev.filter((n) => !idsToRemove.has(n.id)));
     setSelectedNodeId(null);
     if (clipboard?.nodeId && idsToRemove.has(clipboard.nodeId)) {
       setClipboard(null);
@@ -240,14 +258,14 @@ export default function WorkspaceExplorerModal({
       return;
     }
 
-    const updated = nodes.map((n) => {
-      if (n.id === renamingNodeId) {
-        return { ...n, name: trimmed, updatedAt: Date.now() };
-      }
-      return n;
-    });
-
-    onSaveNodes(updated);
+    onSaveNodes((prev) =>
+      prev.map((n) => {
+        if (n.id === renamingNodeId) {
+          return { ...n, name: trimmed, updatedAt: Date.now() };
+        }
+        return n;
+      })
+    );
     setRenamingNodeId(null);
   };
 
@@ -278,18 +296,18 @@ export default function WorkspaceExplorerModal({
       }
     }
 
-    const updated = nodes.map((n) => {
-      if (n.id === cutNode.id) {
-        return {
-          ...n,
-          parentId: currentFolderId,
-          updatedAt: Date.now(),
-        };
-      }
-      return n;
-    });
-
-    onSaveNodes(updated);
+    onSaveNodes((prev) =>
+      prev.map((n) => {
+        if (n.id === cutNode.id) {
+          return {
+            ...n,
+            parentId: currentFolderId,
+            updatedAt: Date.now(),
+          };
+        }
+        return n;
+      })
+    );
     setClipboard(null);
     setSelectedNodeId(cutNode.id);
   };
