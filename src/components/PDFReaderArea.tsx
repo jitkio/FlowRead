@@ -670,6 +670,7 @@ export default function PDFReaderArea({
     let rafId: number | null = null;
     const checkVisible = () => {
       const cRect = container.getBoundingClientRect();
+      if (cRect.width === 0 && cRect.height === 0) return;
       const anchorEls = container.querySelectorAll<HTMLElement>("[data-anchor-id]");
       const visibleIds: string[] = [];
 

@@ -1,0 +1,60 @@
+[
+  {
+    "type": "text",
+    "text": "Sample paragraph with $V _ { g }$ inline math and a tail sentence.",
+    "bbox": [95, 90, 851, 160],
+    "page_idx": 0
+  },
+  {
+    "type": "header",
+    "text": "4 Switch Realization",
+    "bbox": [160, 48, 321, 63],
+    "page_idx": 0
+  },
+  {
+    "type": "page_number",
+    "text": "118",
+    "bbox": [99, 50, 128, 62],
+    "page_idx": 0
+  },
+  {
+    "type": "image",
+    "img_path": "images/fig_v1.jpg",
+    "image_caption": ["Fig. 1.1 Sample v1 figure"],
+    "image_footnote": [],
+    "bbox": [404, 77, 851, 190],
+    "page_idx": 0
+  },
+  {
+    "type": "chart",
+    "img_path": "images/chart_v1.jpg",
+    "content": "",
+    "chart_caption": ["Fig. 1.2 Sample v1 chart"],
+    "chart_footnote": ["Chart footnote v1"],
+    "bbox": [242, 75, 708, 381],
+    "page_idx": 1
+  },
+  {
+    "type": "table",
+    "img_path": "images/table_v1.jpg",
+    "table_caption": ["Table 1.1 Sample v1 table"],
+    "table_footnote": ["Note: sample v1 footnote"],
+    "table_body": "<table><tr><td>Part</td><td> $x _ { 1 }$ </td></tr><tr><td colspan=\"2\">SAMPLE-DEVICE-02</td></tr></table>",
+    "bbox": [95, 100, 851, 300],
+    "page_idx": 1
+  },
+  {
+    "type": "equation",
+    "img_path": "images/eq_v1.jpg",
+    "text": "$$\n\\sum _ { i } V _ { i } ^ { 2 }\n$$",
+    "text_format": "latex",
+    "bbox": [390, 351, 557, 445],
+    "page_idx": 1
+  },
+  {
+    "type": "footer",
+    "text": "Sample v1 footer",
+    "bbox": [93, 859, 599, 905],
+    "page_idx": 1
+  }
+]

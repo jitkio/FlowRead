@@ -1,0 +1,273 @@
+[
+  {
+    "id": "mineru_blk_0001",
+    "type": "page_header",
+    "raw_type": "page_header",
+    "reading_order": 1,
+    "content": "4 Switch Realization",
+    "content_format": "markdown",
+    "page_sample": 1,
+    "page_source": 1,
+    "raw_bbox": [
+      160.0,
+      48.0,
+      321.0,
+      63.0
+    ],
+    "normalized_bbox": [
+      0.16,
+      0.048,
+      0.321,
+      0.063
+    ],
+    "coordinate_system": "mineru_grid_1000"
+  },
+  {
+    "id": "mineru_blk_0002",
+    "type": "page_number",
+    "raw_type": "page_number",
+    "reading_order": 2,
+    "content": "118",
+    "content_format": "markdown",
+    "page_sample": 1,
+    "page_source": 1,
+    "raw_bbox": [
+      99.0,
+      50.0,
+      128.0,
+      62.0
+    ],
+    "normalized_bbox": [
+      0.099,
+      0.05,
+      0.128,
+      0.062
+    ],
+    "coordinate_system": "mineru_grid_1000"
+  },
+  {
+    "id": "mineru_blk_0003",
+    "type": "paragraph",
+    "raw_type": "paragraph",
+    "reading_order": 3,
+    "content": "A converter circuit containing an ideal diode is illustrated in Fig. 4.68. The voltage  $\\nu _ { A } ( t )$  rises from approximately zero to  $V _ { g }$  with interval  $( t _ { 1 } - t _ { 0 } )$ .",
+    "content_format": "markdown",
+    "inline_runs": [
+      {
+        "type": "text",
+        "content": "A converter circuit containing an ideal diode is illustrated in Fig. 4.68. The voltage "
+      },
+      {
+        "type": "equation_inline",
+        "content": "\\nu _ { A } ( t )"
+      },
+      {
+        "type": "text",
+        "content": " rises from approximately zero to "
+      },
+      {
+        "type": "equation_inline",
+        "content": "V _ { g }"
+      },
+      {
+        "type": "text",
+        "content": " with interval "
+      },
+      {
+        "type": "equation_inline",
+        "content": "( t _ { 1 } - t _ { 0 } )"
+      },
+      {
+        "type": "text",
+        "content": "."
+      }
+    ],
+    "page_sample": 1,
+    "page_source": 1,
+    "raw_bbox": [
+      95.0,
+      90.0,
+      851.0,
+      220.0
+    ],
+    "normalized_bbox": [
+      0.095,
+      0.09,
+      0.851,
+      0.22
+    ],
+    "coordinate_system": "mineru_grid_1000"
+  },
+  {
+    "id": "mineru_blk_0004",
+    "type": "image",
+    "raw_type": "image",
+    "reading_order": 4,
+    "content": "Fig. 4.68 Sample switching loss example circuit",
+    "content_format": "markdown",
+    "asset_ref": "fig_circuit.jpg",
+    "caption": "Fig. 4.68 Sample switching loss example circuit",
+    "page_sample": 1,
+    "page_source": 1,
+    "raw_bbox": [
+      404.0,
+      77.0,
+      851.0,
+      190.0
+    ],
+    "normalized_bbox": [
+      0.404,
+      0.077,
+      0.851,
+      0.19
+    ],
+    "coordinate_system": "mineru_grid_1000"
+  },
+  {
+    "id": "mineru_blk_0005",
+    "type": "heading",
+    "raw_type": "title",
+    "reading_order": 5,
+    "content": "## 4.5.3 Sample Section Title",
+    "content_format": "markdown",
+    "heading_level": 2,
+    "page_sample": 1,
+    "page_source": 1,
+    "raw_bbox": [
+      95.0,
+      467.0,
+      353.0,
+      484.0
+    ],
+    "normalized_bbox": [
+      0.095,
+      0.467,
+      0.353,
+      0.484
+    ],
+    "coordinate_system": "mineru_grid_1000"
+  },
+  {
+    "id": "mineru_blk_0006",
+    "type": "heading",
+    "raw_type": "title",
+    "reading_order": 6,
+    "content": "# The Chapter Level Title",
+    "content_format": "markdown",
+    "heading_level": 1,
+    "page_sample": 2,
+    "page_source": 2,
+    "raw_bbox": [
+      95.0,
+      146.0,
+      555.0,
+      166.0
+    ],
+    "normalized_bbox": [
+      0.095,
+      0.146,
+      0.555,
+      0.166
+    ],
+    "coordinate_system": "mineru_grid_1000"
+  },
+  {
+    "id": "mineru_blk_0007",
+    "type": "formula",
+    "raw_type": "equation_interline",
+    "reading_order": 7,
+    "content": "\\begin{array} { l } { W _ { C } = \\sum _ { i } \\frac { 1 } { 2 } C _ { i } V _ { i } ^ { 2 } } \\\\ { W _ { L } = \\sum _ { j } \\frac { 1 } { 2 } L _ { j } I _ { j } ^ { 2 } } \\end{array}\\tag{4.41}",
+    "content_format": "latex",
+    "asset_ref": "eq_snapshot.jpg",
+    "page_sample": 2,
+    "page_source": 2,
+    "raw_bbox": [
+      390.0,
+      351.0,
+      557.0,
+      445.0
+    ],
+    "normalized_bbox": [
+      0.39,
+      0.351,
+      0.557,
+      0.445
+    ],
+    "coordinate_system": "mineru_grid_1000"
+  },
+  {
+    "id": "mineru_blk_0008",
+    "type": "table",
+    "raw_type": "table",
+    "reading_order": 8,
+    "content": "<table><tr><td>Part number</td><td>Rated voltage</td><td> $V _ { F }$  current</td><td> $t _ { f } ( \\mathrm { t y p i c a l } )$ </td></tr><tr><td rowspan=\"2\">SAMPLE-DEVICE-01</td><td>600 V</td><td>23 A</td><td>70 ns</td></tr><tr><td>1200 V</td><td>32 A</td><td>0.62 μs</td></tr></table>",
+    "content_format": "html",
+    "asset_ref": "table_snapshot.jpg",
+    "caption": "Table 4.6 Characteristics of sample devices",
+    "footnote": "Notes: values are typical at 25 C.",
+    "page_sample": 2,
+    "page_source": 2,
+    "raw_bbox": [
+      95.0,
+      100.0,
+      851.0,
+      300.0
+    ],
+    "normalized_bbox": [
+      0.095,
+      0.1,
+      0.851,
+      0.3
+    ],
+    "coordinate_system": "mineru_grid_1000"
+  },
+  {
+    "id": "mineru_blk_0009",
+    "type": "image",
+    "raw_type": "chart",
+    "reading_order": 9,
+    "content": "Fig. 4.77 Sample efficiency vs. switching frequency, based on Eq. (4.52)",
+    "content_format": "markdown",
+    "asset_ref": "chart_curve.jpg",
+    "caption": "Fig. 4.77 Sample efficiency vs. switching frequency, based on Eq. (4.52)",
+    "footnote": "Chart footnote sample",
+    "page_sample": 2,
+    "page_source": 2,
+    "raw_bbox": [
+      242.0,
+      75.0,
+      708.0,
+      381.0
+    ],
+    "normalized_bbox": [
+      0.242,
+      0.075,
+      0.708,
+      0.381
+    ],
+    "coordinate_system": "mineru_grid_1000"
+  },
+  {
+    "id": "mineru_blk_0010",
+    "type": "page_footer",
+    "raw_type": "page_footer",
+    "reading_order": 10,
+    "content": "Sample footer line with attribution",
+    "content_format": "markdown",
+    "page_sample": 2,
+    "page_source": 2,
+    "raw_bbox": [
+      93.0,
+      859.0,
+      599.0,
+      905.0
+    ],
+    "normalized_bbox": [
+      0.093,
+      0.859,
+      0.599,
+      0.905
+    ],
+    "coordinate_system": "mineru_grid_1000"
+  }
+]

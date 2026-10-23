@@ -16,6 +16,8 @@ interface ParsedDocumentPreviewProps {
   target: ParsedPreviewTarget;
   onClose: () => void;
   onOpenAnother: () => Promise<void>;
+  onBindToCurrentDoc?: (filePath: string) => void;
+  currentDocName?: string;
   isModalOpenAbove?: boolean;
 }
 
@@ -23,6 +25,8 @@ export default function ParsedDocumentPreview({
   target,
   onClose,
   onOpenAnother,
+  onBindToCurrentDoc,
+  currentDocName,
   isModalOpenAbove = false,
 }: ParsedDocumentPreviewProps): React.JSX.Element {
   const [loading, setLoading] = useState<boolean>(true);
@@ -180,6 +184,16 @@ export default function ParsedDocumentPreview({
         </div>
 
         <div className="parsed-preview-header-right">
+          {onBindToCurrentDoc && (
+            <button
+              type="button"
+              className="parsed-preview-btn"
+              onClick={() => onBindToCurrentDoc(target.filePath)}
+              title={`将此解析结果持久化绑定到「${currentDocName || "当前文档"}」的隐式工作区`}
+            >
+              绑定到当前文档
+            </button>
+          )}
           <button
             type="button"
             className="parsed-preview-btn"

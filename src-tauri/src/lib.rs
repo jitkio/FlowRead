@@ -162,6 +162,15 @@ mod db;
 use db::*;
 mod parsed_preview;
 use parsed_preview::*;
+mod parsed_workspace;
+use parsed_workspace::*;
+pub mod parse_settings;
+pub mod parse_normalize;
+pub mod parse_providers;
+pub mod parse_jobs;
+/// MinerU 真实产物离线回放入口（纯本地、不联网、不读凭据）
+pub mod mineru_replay;
+use parse_jobs::*;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -172,9 +181,35 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             let db_state = db::init_db(app.handle())?;
+
+            // 应用启动时把上次异常退出遗留的中间态任务转为可恢复状态，
+            // 避免永久停在 processing / submitting 等状态。
+            {
+                let conn = db_state
+                    .conn
+                    .lock()
+                    .map_err(|e| format!("数据库连接不可用: {}", e))?;
+                match parse_jobs::recover_interrupted_jobs(&conn) {
+                    Ok(n) if n > 0 => {
+                        eprintln!("[FlowRead] 已将 {} 个中断的解析任务标记为可继续", n);
+                    }
+                    Ok(_) => {}
+                    Err(e) => eprintln!("[FlowRead] 恢复中断解析任务失败: {}", e),
+                }
+            }
+
             app.manage(db_state);
             let preview_state = parsed_preview::ParsedPreviewState::new();
             app.manage(preview_state);
+
+            let (parse_manager, parse_rx) = parse_jobs::ParseManager::new(app.handle().clone());
+            let app_handle_clone = app.handle().clone();
+            let cancel_senders_clone = parse_manager.cancel_senders.clone();
+            tauri::async_runtime::spawn(async move {
+                parse_jobs::run_worker_loop(app_handle_clone, cancel_senders_clone, parse_rx).await;
+            });
+            app.manage(parse_manager);
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -184,6 +219,8 @@ pub fn run() {
             parsed_preview_open,
             parsed_preview_read_asset,
             parsed_preview_close,
+            parsed_workspace_import_dir,
+            parsed_workspace_get_active,
             db_get_or_create_document,
             db_save_reading_position,
             db_save_reading_preferences,
@@ -208,6 +245,17 @@ pub fn run() {
             db_get_highlights,
             db_delete_highlight,
             db_export_document_markdown,
+            parse_settings_get,
+            parse_settings_save,
+            parse_provider_set_token,
+            parse_provider_clear_token,
+            parse_job_start,
+            parse_job_get,
+            parse_job_cancel,
+            parse_job_resume,
+            parse_job_list,
+            parse_job_result,
+            parse_service_health,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

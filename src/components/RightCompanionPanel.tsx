@@ -32,6 +32,8 @@ export interface RightCompanionPanelProps {
   visibleAnchorIds: string[];
   cards: CardRecord[];
   onRefreshCards: () => void;
+  viewMode?: "original" | "reflow";
+  activeParsedVersionId?: string | null;
 }
 
 type PanelView = "following" | "records";
@@ -56,6 +58,8 @@ export default function RightCompanionPanel({
   visibleAnchorIds,
   cards,
   onRefreshCards,
+  viewMode = "original",
+  activeParsedVersionId,
 }: RightCompanionPanelProps): React.JSX.Element {
   const [activeView, setActiveView] = useState<PanelView>("following");
   const [recordFilter, setRecordFilter] = useState<RecordFilter>("all");
@@ -359,13 +363,19 @@ export default function RightCompanionPanel({
 
     const groups: { anchorId: string; cards: CardRecord[]; naturalTop: number }[] = [];
 
-    // 所有来源查找严格限定在左侧阅读区域，避免误命中右侧同名 data-anchor-id
+    // 所有来源查找严格限定在当前活动的左侧阅读区域，避免误命中右侧同名 data-anchor-id 或隐藏的原版阅读器
     const leftReaderEl =
-      document.querySelector<HTMLElement>('[data-reader-viewport="true"]') ||
-      document.querySelector<HTMLElement>(".reader-scroll-viewport") ||
-      document.querySelector<HTMLElement>(".pdf-scroll-viewport") ||
-      document.querySelector<HTMLElement>(".reader-container") ||
-      document.querySelector<HTMLElement>(".pdf-reader-container");
+      viewMode === "reflow"
+        ? document.querySelector<HTMLElement>(
+            ".flowread-parsed-reflow-area .parsed-reflow-scroll-area"
+          ) ||
+          document.querySelector<HTMLElement>(".parsed-reflow-scroll-area") ||
+          document.querySelector<HTMLElement>(".flowread-parsed-reflow-area")
+        : document.querySelector<HTMLElement>('[data-reader-viewport="true"]') ||
+          document.querySelector<HTMLElement>(".reader-scroll-viewport") ||
+          document.querySelector<HTMLElement>(".pdf-scroll-viewport") ||
+          document.querySelector<HTMLElement>(".reader-container") ||
+          document.querySelector<HTMLElement>(".pdf-reader-container");
     if (!leftReaderEl) return;
 
     for (const aid of visibleAnchorIds) {
@@ -377,18 +387,38 @@ export default function RightCompanionPanel({
           : cards.filter(
               (c) => c.anchor_id === aid && !deletedCardIdsRef.current.has(c.card_id)
             );
-      if (matched.length === 0) continue;
 
-      // 仅在左侧阅读区内查找来源锚点，严禁命中右侧卡片自身，并优先选取与当前视口相交的片段
+      // 严格过滤属于当前视图与解析版本的卡片
+      let filteredMatched = matched;
+      if (viewMode === "reflow" && activeParsedVersionId) {
+        filteredMatched = matched.filter((c) => {
+          if (c.anchor_source_type === "parsed_text") {
+            try {
+              if (c.anchor_location_json) {
+                const loc = JSON.parse(c.anchor_location_json);
+                return loc.parsedVersionId === activeParsedVersionId;
+              }
+            } catch {
+              return false;
+            }
+          }
+          return false; // 重排跟随视图只使用当前重排版本的有效卡片
+        });
+      } else if (viewMode === "original") {
+        filteredMatched = matched.filter((c) => c.anchor_source_type !== "parsed_text");
+      }
+      if (filteredMatched.length === 0) continue;
+
+      // 仅在当前活动阅读视口中查找来源锚点，严禁借用隐藏原版视口的坐标排布重排卡片
       const anchorEl = findVisibleAnchorElement(leftReaderEl, aid);
-      if (!anchorEl || !leftReaderEl.contains(anchorEl)) continue;
+      if (!anchorEl) continue;
 
       const ancRect = anchorEl.getBoundingClientRect();
       const naturalTop = ancRect.top - containerRect.top;
 
       groups.push({
         anchorId: aid,
-        cards: matched,
+        cards: filteredMatched,
         naturalTop,
       });
     }
@@ -398,7 +428,7 @@ export default function RightCompanionPanel({
 
     // 避碰算法：使用真实卡片高度或 ResizeObserver 动态更新的高度 (提问栏已迁移至正文下方，释放底部避让空间)
     let currentBottom = 12;
-    const maxAllowedBottom = containerRect.height - 24;
+    const maxAllowedBottom = containerRect.height > 0 ? containerRect.height - 24 : Infinity;
     const result: PositionedAnchorGroup[] = [];
 
     for (const g of groups) {
@@ -446,7 +476,7 @@ export default function RightCompanionPanel({
       }
       return result;
     });
-  }, [activeView, visibleAnchorIds, cards]);
+  }, [activeView, visibleAnchorIds, cards, viewMode, activeParsedVersionId]);
 
   // 当卡片排布结果发生真实改变后，通知连线层重新刷新端点坐标
   useEffect(() => {
@@ -468,8 +498,8 @@ export default function RightCompanionPanel({
     void apiGetCardsByAnchorIds(reqDocId, missingIds).then((resCards) => {
       if (isCancelled || currentDocRef.current?.id !== reqDocId) return;
       for (const aid of missingIds) {
-        fullyQueriedAnchorsRef.current.add(aid);
-        const fromDb = resCards.filter(
+        const safeCards = Array.isArray(resCards) ? resCards : [];
+        const fromDb = safeCards.filter(
           (c) => c.anchor_id === aid && !deletedCardIdsRef.current.has(c.card_id)
         );
         const cached = (followingCacheRef.current.get(aid) || []).filter(
@@ -505,8 +535,9 @@ export default function RightCompanionPanel({
         const aid = el.dataset.anchorId;
         if (aid) {
           const h = el.offsetHeight || entry.contentRect.height;
-          if (h > 0 && Math.abs((cardHeightsRef.current.get(aid) || 0) - h) > 2) {
-            cardHeightsRef.current.set(aid, h);
+          const clampedH = Math.min(h, 300);
+          if (clampedH > 0 && Math.abs((cardHeightsRef.current.get(aid) || 0) - clampedH) > 2) {
+            cardHeightsRef.current.set(aid, clampedH);
             changed = true;
           }
         }

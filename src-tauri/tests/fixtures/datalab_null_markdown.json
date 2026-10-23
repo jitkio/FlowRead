@@ -1,0 +1,110 @@
+{
+  "_note": "脱敏最小 fixture：结构取自真实 Datalab v2 产物（markdown 全为 null、正文在 html、公式为 MathML 实体、图片为 Base64），内容已改写。",
+  "children": [
+    {
+      "id": "/page/0/Page",
+      "block_type": "Page",
+      "bbox": [
+        0,
+        0,
+        1275,
+        1650
+      ],
+      "html": "<div class=\"page\"></div>",
+      "children": [
+        {
+          "id": "/page/0/PageHeader/0",
+          "block_type": "PageHeader",
+          "html": "",
+          "page": 0,
+          "bbox": [
+            755,
+            94,
+            1146,
+            125
+          ],
+          "images": {},
+          "markdown": null,
+          "inference_failed": false,
+          "metadata": null
+        },
+        {
+          "id": "/page/0/Text/1",
+          "block_type": "Text",
+          "html": "<p>With the switch in position 1, the inductor is connected to ground and <math>v_L</math> equals the input.</p>",
+          "page": 0,
+          "bbox": [
+            100,
+            200,
+            1100,
+            300
+          ],
+          "images": {},
+          "markdown": null,
+          "inference_failed": false,
+          "metadata": null
+        },
+        {
+          "id": "/page/0/Equation/2",
+          "block_type": "Equation",
+          "html": "<p><math display=\"block\">\\begin{aligned} v_L &amp;= V_g \\\\ i_C &amp;= -\\frac{v}{R} \\end{aligned} \\tag{2.28}</math></p>",
+          "page": 0,
+          "bbox": [
+            200,
+            320,
+            1000,
+            420
+          ],
+          "images": {},
+          "markdown": null,
+          "inference_failed": false,
+          "metadata": null
+        },
+        {
+          "id": "/page/0/Diagram/3",
+          "block_type": "Figure",
+          "html": "<img src=\"fig.png\"/><p class=\"img-text\">(a)</p><p class=\"img-text\"><math>V_g</math></p>",
+          "page": 0,
+          "bbox": [
+            300,
+            450,
+            900,
+            900
+          ],
+          "images": {
+            "fig.png": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+          },
+          "markdown": null,
+          "inference_failed": false,
+          "metadata": null
+        },
+        {
+          "id": "/page/0/Caption/4",
+          "block_type": "Caption",
+          "html": "<p><b>Fig. 2.13</b> Boost converter with ideal switch and practical diode</p>",
+          "page": 0,
+          "bbox": [
+            150,
+            910,
+            1126,
+            951
+          ],
+          "images": {},
+          "markdown": null,
+          "inference_failed": false,
+          "metadata": null
+        }
+      ],
+      "section_hierarchy": {}
+    }
+  ],
+  "metadata": {
+    "page_stats": [
+      {
+        "page_id": 0,
+        "num_blocks": 5
+      }
+    ],
+    "failed_pages": []
+  }
+}

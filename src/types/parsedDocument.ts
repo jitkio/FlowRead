@@ -12,6 +12,7 @@ export type ParsedBlockType =
   | "caption"
   | "page_header"
   | "page_number"
+  | "page_footer"
   | "unknown";
 
 export type ContentFormat = "markdown" | "latex" | "html" | string;
@@ -32,6 +33,10 @@ export interface ParsedBlock {
   inline_runs?: InlineRun[];
   asset_ref?: string | null;
   caption?: string | null;
+  /** 脚注说明文字（表格/图表下方的 footnote） */
+  footnote?: string | null;
+  /** 标题层级 1-6（非法值由 loader 丢弃为 null） */
+  heading_level?: number | null;
   in_image_text?: string[];
   page_sample?: number;
   page_source?: number;

@@ -190,16 +190,94 @@
 
 /* 独立公式样式 */
 .parsed-formula-container {
-  margin: 1.4em 0;
-  display: flex;
-  justify-content: center;
+  margin: 1.8em 0;
+  width: 100%;
+  display: block;
 }
 
 .parsed-formula-scroll {
   overflow-x: auto;
-  max-width: 100%;
-  padding: 6px 12px;
+  width: 100%;
+  padding: 8px 16px;
   scrollbar-width: thin;
+  box-sizing: border-box;
+}
+
+.parsed-formula-scroll > .katex-display {
+  display: block;
+  width: 100%;
+  margin: 0.6em 0;
+  text-align: center;
+}
+
+.parsed-formula-scroll > .katex-display > .katex {
+  display: block;
+  width: 100%;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.parsed-formula-scroll > .katex-display > .katex > .katex-html {
+  display: block;
+  width: 100%;
+  min-width: 100%;
+  position: relative;
+  box-sizing: border-box;
+}
+
+/* 1. 无编号公式：完全正常居中，绝不预留不存在的编号空间 */
+.parsed-formula-container.no-tag .parsed-formula-scroll > .katex-display > .katex > .katex-html {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* 2. 有编号公式：两侧对称保留专属编号边距，主体与编号各有空间，长公式横向滚动不覆盖编号 */
+.parsed-formula-container.has-tag .parsed-formula-scroll > .katex-display > .katex > .katex-html {
+  padding-left: 4.5em;
+  padding-right: 4.5em;
+}
+
+.parsed-formula-container.has-tag .parsed-formula-scroll > .katex-display > .katex > .katex-html > .katex-tag {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* 公式兼容修复轻量提示与查看原式 */
+.parsed-formula-repair-note {
+  margin-top: 6px;
+  padding: 0 16px;
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.parsed-formula-repair-badge {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--mut, #85827b);
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--ln, #333230);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+.parsed-formula-raw-toggle {
+  background: none;
+  border: none;
+  color: var(--pen, #e8664a);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.parsed-formula-raw-toggle:hover {
+  opacity: 0.85;
 }
 
 /* 公式错误兜底容器 */
@@ -304,22 +382,57 @@
   scrollbar-width: thin;
 }
 
+.parsed-table-container table,
+.parsed-controlled-content table,
 .parsed-table-element {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.92em;
+  margin: 0.5em 0;
 }
 
+.parsed-table-container th,
+.parsed-table-container td,
+.parsed-controlled-content th,
+.parsed-controlled-content td,
 .parsed-table-element th,
 .parsed-table-element td {
   border: 1px solid var(--ln, #262523);
   padding: 8px 12px;
   vertical-align: top;
+  text-align: inherit;
 }
 
+/* 表头底色 */
+.parsed-table-container thead th,
+.parsed-table-container thead tr,
+.parsed-controlled-content thead th,
 .parsed-tr-head th {
   background-color: var(--cd, #151514);
   font-weight: 600;
+  color: var(--fg, #e8e5de);
+}
+
+/* 支持 align 对齐属性与对齐样式 */
+.parsed-table-container th[align="left"],
+.parsed-table-container td[align="left"],
+.parsed-controlled-content th[align="left"],
+.parsed-controlled-content td[align="left"] {
+  text-align: left;
+}
+
+.parsed-table-container th[align="center"],
+.parsed-table-container td[align="center"],
+.parsed-controlled-content th[align="center"],
+.parsed-controlled-content td[align="center"] {
+  text-align: center;
+}
+
+.parsed-table-container th[align="right"],
+.parsed-table-container td[align="right"],
+.parsed-controlled-content th[align="right"],
+.parsed-controlled-content td[align="right"] {
+  text-align: right;
 }
 
 /* 未识别结构块样式 */
@@ -414,4 +527,225 @@
   background-color: rgba(148, 163, 184, 0.1);
   border-radius: 3px;
   border: 1px dashed var(--ln, #333230);
+}
+
+/* 受控内联本地图片与加载/错误状态 */
+.parsed-inline-image {
+  max-width: 100%;
+  height: auto;
+  display: inline-block;
+  vertical-align: middle;
+  border-radius: 4px;
+  background-color: #ffffff;
+  padding: 4px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.parsed-image-inline-loading {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--mut, #85827b);
+  padding: 2px 6px;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+}
+
+.parsed-image-inline-error {
+  display: inline-block;
+  font-size: 11px;
+  color: #f85149;
+  background-color: rgba(248, 81, 73, 0.1);
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px dashed rgba(248, 81, 73, 0.4);
+}
+
+/* ==========================================================================
+   FlowRead - 阶段 2B 隐式重排阅读区与文档级视图切换样式
+   ========================================================================== */
+
+.flowread-parsed-reflow-area {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--bg, #0d0d0c);
+  color: var(--fg, #e8e5de);
+  position: relative;
+}
+
+.parsed-reflow-toolbar {
+  height: 38px;
+  background-color: var(--cd, #151514);
+  border-bottom: 1px solid var(--ln, #262523);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.parsed-reflow-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.parsed-reflow-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg, #e8e5de);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.parsed-reflow-provider-tag {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background-color: color-mix(in srgb, var(--fg, #fff) 10%, transparent);
+  color: var(--mut, #85827b);
+  border: 1px solid var(--ln, #262523);
+  text-transform: uppercase;
+}
+
+.parsed-reflow-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.parsed-reflow-scroll-area {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 32px 24px 80px;
+  display: flex;
+  justify-content: center;
+}
+
+/* 顶部栏视图切换药丸按钮组 */
+.view-mode-toggle-group {
+  display: inline-flex;
+  align-items: center;
+  background-color: var(--cd, #1a1a19);
+  border: 1px solid var(--ln, #2d2c2a);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.view-mode-toggle-btn {
+  background: transparent;
+  border: none;
+  color: var(--mut, #85827b);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.view-mode-toggle-btn:hover {
+  color: var(--fg, #e8e5de);
+  background-color: color-mix(in srgb, var(--fg, #fff) 5%, transparent);
+}
+
+.view-mode-toggle-btn.is-active {
+  background-color: var(--pen, #e8664a);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.view-mode-outdated-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #e3b341;
+  display: inline-block;
+}
+
+/* 流式重排正文划选高亮与通知层 */
+.parsed-reflow-block-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.parsed-reflow-highlight-group {
+  position: absolute;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.parsed-reflow-highlight-rect {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 2px;
+  mix-blend-mode: multiply;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+[data-theme="dark"] .parsed-reflow-highlight-rect {
+  mix-blend-mode: screen;
+}
+
+.parsed-reflow-highlight-group.is-active .parsed-reflow-highlight-rect {
+  box-shadow: 0 0 0 1.5px var(--pen, #e8664a);
+}
+
+.parsed-reflow-flash-rect {
+  position: absolute;
+  pointer-events: none;
+  background-color: rgba(232, 102, 74, 0.35);
+  box-shadow: 0 0 0 2px var(--pen, #e8664a);
+  border-radius: 2px;
+  z-index: 3;
+  animation: reflowFlashFade 2s ease-out forwards;
+}
+
+@keyframes reflowFlashFade {
+  0% { opacity: 1; }
+  70% { opacity: 0.8; }
+  100% { opacity: 0; }
+}
+
+.parsed-reflow-toast {
+  position: fixed;
+  top: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: var(--cd, #252422);
+  color: var(--fg, #e8e5de);
+  border: 1px solid var(--ln, #3d3b38);
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  z-index: 1500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: fadeInDown 0.18s ease-out;
+}
+
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -10px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
 }

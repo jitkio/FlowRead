@@ -380,3 +380,45 @@ export async function apiGetHighlights(
 export async function apiDeleteHighlight(highlightId: string): Promise<void> {
   await invoke("db_delete_highlight", { highlightId });
 }
+
+export interface ActiveParsedWorkspaceResponse {
+  version_id: string;
+  document_id: string;
+  source_revision: string;
+  provider: string;
+  block_count: number;
+  asset_count: number;
+  created_at: number;
+  session_id: string;
+  blocks_path: string;
+  doc_dir: string;
+  raw_json: string;
+  has_assets: boolean;
+}
+
+export async function apiParsedWorkspaceImportDir(
+  documentId: string,
+  sourceRevision: string,
+  sourceBlocksPath: string,
+  provider: string = "manual_import"
+): Promise<ActiveParsedWorkspaceResponse> {
+  return await invoke<ActiveParsedWorkspaceResponse>("parsed_workspace_import_dir", {
+    documentId,
+    sourceRevision,
+    sourceBlocksPath,
+    provider,
+  });
+}
+
+export async function apiParsedWorkspaceGetActive(
+  documentId: string
+): Promise<ActiveParsedWorkspaceResponse | null> {
+  return await invoke<ActiveParsedWorkspaceResponse | null>("parsed_workspace_get_active", {
+    documentId,
+  });
+}
+
+export async function apiParsedPreviewClose(sessionId: string): Promise<void> {
+  await invoke("parsed_preview_close", { sessionId });
+}
+

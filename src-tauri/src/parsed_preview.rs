@@ -130,6 +130,92 @@ pub fn open_preview_internal(
     })
 }
 
+/// 标准化并校验本地资产相对路径
+/// 规则：
+/// 1. 外部资源（http://, https://, data:, blob:, //）返回 Ok(None)，不当作缺失本地文件；
+/// 2. 绝对路径（以 / 或 \ 开头，或包含 Windows 盘符如 C:）与路径穿越（包含 ..）严格报错拦截，绝不通过截断伪装成本地相对路径；
+/// 3. 支持合法格式：assets/a.png, ./assets/a.png, a.png, ./a.png, assets/sub/a.png；
+/// 4. 统一返回相对于 assets/ 目录的子路径，格式统一为正斜杠（如 "a.png", "sub/a.png"）。
+pub fn clean_local_asset_path(raw: &str) -> Result<Option<String>, String> {
+    let mut s = raw.trim();
+    if s.is_empty() {
+        return Ok(None);
+    }
+
+    // 1. 检查外部链接（支持协议相对 URL //example.com/a.png）
+    if s.starts_with("//")
+        || s.to_ascii_lowercase().starts_with("http://")
+        || s.to_ascii_lowercase().starts_with("https://")
+        || s.to_ascii_lowercase().starts_with("data:")
+        || s.to_ascii_lowercase().starts_with("blob:")
+    {
+        return Ok(None);
+    }
+
+    // 剥离查询参数和锚点（例如 assets/a.png?v=1#hash）
+    if let Some(pos) = s.find(['?', '#']) {
+        s = &s[..pos];
+    }
+    let s = s.trim();
+    if s.is_empty() {
+        return Ok(None);
+    }
+
+    // 2. 严厉防御绝对路径与跨盘符访问：严禁截断伪装
+    if s.starts_with('/') || s.starts_with('\\') || s.contains(':') {
+        return Err(format!("非法资产引用路径 (禁止盘符或绝对路径): {}", raw));
+    }
+
+    // 允许且仅允许前导的 ./ 或 .\ 相对路径声明
+    let mut clean_str = s;
+    while clean_str.starts_with("./") || clean_str.starts_with(".\\") {
+        clean_str = &clean_str[2..];
+    }
+    let clean_str = clean_str.trim();
+    if clean_str.is_empty() {
+        return Ok(None);
+    }
+
+    // 剥离 ./ 后若仍是以 / 或 \ 开头，则为伪装的根路径，立即拒绝
+    if clean_str.starts_with('/') || clean_str.starts_with('\\') {
+        return Err(format!("非法资产引用路径 (禁止盘符或绝对路径): {}", raw));
+    }
+
+    let p = Path::new(clean_str);
+    // 按路径组件严格检查：禁止包含 ParentDir (..)、RootDir、Prefix 等
+    for comp in p.components() {
+        match comp {
+            std::path::Component::Normal(_) => {}
+            _ => return Err(format!("非法资产引用路径 (禁止跨目录逃逸或包含非法组件): {}", raw)),
+        }
+    }
+
+    // 3. 提取相对于 assets 目录的路径
+    let first_is_assets = p.components().next().map_or(false, |c| {
+        if let std::path::Component::Normal(os) = c {
+            os.to_str().map_or(false, |name| name.eq_ignore_ascii_case("assets"))
+        } else {
+            false
+        }
+    });
+
+    let subpath = if first_is_assets {
+        let mut iter = p.components();
+        iter.next(); // 跳过 assets
+        iter.as_path()
+    } else {
+        p
+    };
+
+    let subpath_str = subpath.to_string_lossy().replace('\\', "/");
+    let subpath_trimmed = subpath_str.trim();
+    if subpath_trimmed.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(subpath_trimmed.to_string()))
+}
+
 pub fn read_asset_internal(
     session_id: &str,
     asset_ref: &str,
@@ -148,25 +234,22 @@ pub fn read_asset_internal(
         return Err("当前解析产物未包含 assets 目录".to_string());
     }
 
-    // 清洗路径：禁止遍历字符与绝对路径前缀
-    let trimmed = asset_ref.trim();
-    if trimmed.contains("..") || trimmed.starts_with('/') || trimmed.starts_with('\\') {
-        return Err(format!("非法资产引用路径 (禁止跨目录逃逸): {}", asset_ref));
-    }
-    if trimmed.contains(':') {
-        return Err(format!("非法资产引用路径 (禁止盘符引用): {}", asset_ref));
-    }
-
-    // 允许以 assets/ 或 assets\ 开头，进行相对剥离
-    let clean_ref = if trimmed.starts_with("assets/") || trimmed.starts_with("assets\\") {
-        &trimmed[7..]
-    } else {
-        trimmed
+    let clean_subpath = match clean_local_asset_path(asset_ref)? {
+        Some(p) => p,
+        None => return Err(format!("外部资源或非本地文件不可通过本地预览会话读取: {}", asset_ref)),
     };
 
-    let target_path = session.assets_dir.join(clean_ref);
+    let clean_path = Path::new(&clean_subpath);
+    let target_path = session.assets_dir.join(clean_path);
     if !target_path.exists() {
-        return Err(format!("资产文件不存在: {}", clean_ref));
+        return Err(format!("资产文件不存在: {}", clean_subpath));
+    }
+
+    // 排除符号链接
+    if let Ok(sym_meta) = fs::symlink_metadata(&target_path) {
+        if sym_meta.file_type().is_symlink() {
+            return Err("安全拦截：禁止访问符号链接资产".to_string());
+        }
     }
 
     let canonical_assets = session
@@ -238,10 +321,35 @@ mod tests {
         let data2 = read_asset_internal(&info.session_id, "assets/pic1.jpg", &state_sessions).unwrap();
         assert_eq!(data2, b"fake_jpeg_bytes");
 
+        // 3b. 读取带 ./assets/ 和 ./ 前缀的资产
+        let data_dot_assets = read_asset_internal(&info.session_id, "./assets/pic1.jpg", &state_sessions).unwrap();
+        assert_eq!(data_dot_assets, b"fake_jpeg_bytes");
+        let data_dot = read_asset_internal(&info.session_id, "./pic1.jpg", &state_sessions).unwrap();
+        assert_eq!(data_dot, b"fake_jpeg_bytes");
+
+        // 3c. 读取嵌套目录资产
+        let sub_dir = assets_dir.join("sub");
+        fs::create_dir_all(&sub_dir).unwrap();
+        fs::write(sub_dir.join("deep.png"), b"deep_bytes").unwrap();
+        let data_deep = read_asset_internal(&info.session_id, "assets/sub/deep.png", &state_sessions).unwrap();
+        assert_eq!(data_deep, b"deep_bytes");
+        let data_deep_dot = read_asset_internal(&info.session_id, "./assets/sub/deep.png", &state_sessions).unwrap();
+        assert_eq!(data_deep_dot, b"deep_bytes");
+
         // 4. 越界路径攻击防御检测
         let err_traversal = read_asset_internal(&info.session_id, "../secret.txt", &state_sessions);
         assert!(err_traversal.is_err());
         assert!(err_traversal.unwrap_err().contains("跨目录逃逸"));
+
+        // 4b. 绝对路径与跨盘符拦截检测（不得截断伪装）
+        let err_abs = read_asset_internal(&info.session_id, "/pic1.jpg", &state_sessions);
+        assert!(err_abs.is_err());
+        assert!(err_abs.unwrap_err().contains("禁止盘符或绝对路径"));
+
+        // 4c. 外部资源拦截检测
+        let err_ext = read_asset_internal(&info.session_id, "//example.com/pic1.jpg", &state_sessions);
+        assert!(err_ext.is_err());
+        assert!(err_ext.unwrap_err().contains("外部资源或非本地文件"));
 
         // 5. 不存在资产
         let err_missing = read_asset_internal(&info.session_id, "not_exist.jpg", &state_sessions);

@@ -22,3 +22,35 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Rust target
+target/
+src-tauri/target/
+
+# Local databases and replay caches
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+.mineru-replay/
+.workbuddy/
+
+# Environment and Secret files
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.cert
+*.p12
+*.pfx
+credentials/
+*.local.json
+
+# Python virtual environment and caches
+.venv/
+__pycache__/
+*.pyc
+*.pyo

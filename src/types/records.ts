@@ -2,7 +2,7 @@
  * FlowRead - 学习记录、来源锚点与阅读偏好数据类型定义
  */
 
-export type SourceType = "pdf_text" | "pdf_image" | "text_segment";
+export type SourceType = "pdf_text" | "pdf_image" | "text_segment" | "parsed_text";
 
 export interface PDFTextSegment {
   pageNumber: number;
@@ -26,10 +26,30 @@ export interface TextParagraphSegment {
   suffix?: string;
 }
 
+export interface ParsedTextSegment {
+  blockId: string;
+  startOffset: number;
+  endOffset: number;
+  quote: string;
+  prefix: string;
+  suffix: string;
+  textHash: string;
+}
+
+export interface ParsedTextLocation {
+  type: "parsed_text";
+  schemaVersion: 1;
+  parsedVersionId: string;
+  sourceRevision: string;
+  projectionVersion: 1;
+  segments: ParsedTextSegment[];
+}
+
 export type SourceLocationData =
   | { type: "pdf_text"; segments: PDFTextSegment[] }
   | { type: "pdf_image"; location: PDFImageLocation }
-  | { type: "text_segment"; segments: TextParagraphSegment[] };
+  | { type: "text_segment"; segments: TextParagraphSegment[] }
+  | ParsedTextLocation;
 
 export interface DocumentRecord {
   id: string;

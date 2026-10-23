@@ -120,6 +120,20 @@ pub struct AssetRecord {
     pub created_at: i64,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ParsedDocumentVersionRecord {
+    pub version_id: String,
+    pub document_id: String,
+    pub source_revision: String,
+    pub provider: String,
+    pub config_signature: String,
+    pub storage_rel_path: String,
+    pub block_count: i64,
+    pub asset_count: i64,
+    pub is_active: i64,
+    pub created_at: i64,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CardListResponse {
     pub items: Vec<CardRecord>,
@@ -127,7 +141,92 @@ pub struct CardListResponse {
     pub has_more: bool,
 }
 
-fn now_ms() -> i64 {
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct ParseJobRecord {
+    pub job_id: String,
+    pub document_id: String,
+    pub source_path: String,
+    pub document_name: String,
+    pub source_hash: String,
+    pub source_revision: String,
+    pub provider: String,
+    pub config_signature: String,
+    pub status: String,
+    pub progress_percent: Option<i64>,
+    pub completed_pages: Option<i64>,
+    pub total_pages: Option<i64>,
+    pub remote_id: Option<String>,
+    pub remote_meta_json: Option<String>,
+    pub version_id: Option<String>,
+    pub activated: i64,
+    pub can_cancel: i64,
+    pub can_resume: i64,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub update_seq: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+    // ---- 恢复检查点（应用重启后继续任务所需的持久状态）----
+    pub snapshot_rel_path: Option<String>,
+    pub remote_submitted: i64,
+    pub upload_completed: i64,
+    pub artifacts_downloaded: i64,
+    pub normalized_ready: i64,
+    pub activation_baseline_version_id: Option<String>,
+    /// 是否已经发出过“可能被服务商受理”的提交请求（发出前持久化，跨重启保留）
+    pub submit_attempted: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ParseJobDto {
+    pub job_id: String,
+    pub document_id: String,
+    pub source_path: String,
+    pub document_name: String,
+    pub source_revision: String,
+    pub provider: String,
+    pub status: String,
+    pub progress_percent: Option<i64>,
+    pub completed_pages: Option<i64>,
+    pub total_pages: Option<i64>,
+    pub version_id: Option<String>,
+    pub activated: bool,
+    pub can_cancel: bool,
+    pub can_resume: bool,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub update_seq: i64,
+}
+
+impl ParseJobRecord {
+    pub fn to_dto(&self) -> ParseJobDto {
+        ParseJobDto {
+            job_id: self.job_id.clone(),
+            document_id: self.document_id.clone(),
+            source_path: self.source_path.clone(),
+            document_name: self.document_name.clone(),
+            source_revision: self.source_revision.clone(),
+            provider: self.provider.clone(),
+            status: self.status.clone(),
+            progress_percent: self.progress_percent,
+            completed_pages: self.completed_pages,
+            total_pages: self.total_pages,
+            version_id: self.version_id.clone(),
+            activated: self.activated == 1,
+            can_cancel: self.can_cancel == 1,
+            can_resume: self.can_resume == 1,
+            error_code: self.error_code.clone(),
+            error_message: self.error_message.clone(),
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+            update_seq: self.update_seq,
+        }
+    }
+}
+
+pub fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -179,7 +278,7 @@ pub fn init_db(app_handle: &AppHandle) -> Result<DbState, String> {
     })
 }
 
-fn run_migrations(conn: &Connection) -> Result<(), String> {
+pub fn run_migrations(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -273,6 +372,19 @@ fn run_migrations(conn: &Connection) -> Result<(), String> {
             updated_at INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS parsed_document_versions (
+            version_id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            source_revision TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            config_signature TEXT NOT NULL,
+            storage_rel_path TEXT NOT NULL,
+            block_count INTEGER NOT NULL DEFAULT 0,
+            asset_count INTEGER NOT NULL DEFAULT 0,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at INTEGER NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_anchors_doc ON source_anchors(document_id);
         CREATE INDEX IF NOT EXISTS idx_cards_doc ON cards(document_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_cards_doc_cursor ON cards(document_id, created_at DESC, card_id DESC);
@@ -282,6 +394,8 @@ fn run_migrations(conn: &Connection) -> Result<(), String> {
         CREATE INDEX IF NOT EXISTS idx_fn_results_card ON card_function_results(card_id, mode);
         CREATE INDEX IF NOT EXISTS idx_highlights_doc ON highlights(document_id);
         CREATE INDEX IF NOT EXISTS idx_assets_doc ON assets(document_id);
+        CREATE INDEX IF NOT EXISTS idx_parsed_doc_active ON parsed_document_versions(document_id, is_active);
+        CREATE INDEX IF NOT EXISTS idx_parsed_doc_created ON parsed_document_versions(document_id, created_at DESC);
         ",
     )
     .map_err(|e| format!("执行数据库初始化 SQL 失败: {}", e))?;
@@ -296,20 +410,1024 @@ fn run_migrations(conn: &Connection) -> Result<(), String> {
         [],
     );
 
+    // 幂等清理历史可能残留的多激活版本（按每篇文档保留最新一条），并建立唯一激活部分索引
+    conn.execute(
+        "UPDATE parsed_document_versions
+         SET is_active = 0
+         WHERE version_id NOT IN (
+             SELECT version_id FROM (
+                 SELECT version_id,
+                        ROW_NUMBER() OVER (PARTITION BY document_id ORDER BY created_at DESC) as rn
+                 FROM parsed_document_versions
+                 WHERE is_active = 1
+             ) WHERE rn = 1
+         ) AND is_active = 1",
+        [],
+    )
+    .map_err(|e| format!("清理历史多激活解析版本数据失败: {}", e))?;
+
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_parsed_doc_single_active 
+         ON parsed_document_versions(document_id) 
+         WHERE is_active = 1",
+        [],
+    )
+    .map_err(|e| format!("创建解析版本单激活唯一索引失败: {}", e))?;
+
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS parse_jobs (
+            job_id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            source_path TEXT NOT NULL,
+            document_name TEXT NOT NULL,
+            source_hash TEXT NOT NULL,
+            source_revision TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            config_signature TEXT NOT NULL,
+            status TEXT NOT NULL,
+            progress_percent INTEGER,
+            completed_pages INTEGER,
+            total_pages INTEGER,
+            remote_id TEXT,
+            remote_meta_json TEXT,
+            version_id TEXT,
+            activated INTEGER NOT NULL DEFAULT 0,
+            can_cancel INTEGER NOT NULL DEFAULT 0,
+            can_resume INTEGER NOT NULL DEFAULT 0,
+            error_code TEXT,
+            error_message TEXT,
+            update_seq INTEGER NOT NULL DEFAULT 1,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            snapshot_rel_path TEXT,
+            remote_submitted INTEGER NOT NULL DEFAULT 0,
+            upload_completed INTEGER NOT NULL DEFAULT 0,
+            artifacts_downloaded INTEGER NOT NULL DEFAULT 0,
+            normalized_ready INTEGER NOT NULL DEFAULT 0,
+            activation_baseline_version_id TEXT,
+            submit_attempted INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_parse_jobs_doc ON parse_jobs(document_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_parse_jobs_status_created ON parse_jobs(status, created_at ASC);
+        CREATE INDEX IF NOT EXISTS idx_parse_jobs_hash ON parse_jobs(source_hash, provider, config_signature);
+        ",
+    )
+    .map_err(|e| format!("执行解析任务与应用设置表初始化 SQL 失败: {}", e))?;
+
+    // 兼容已存在的用户数据库：检查点列必须幂等补齐，不能要求用户重建库。
+    ensure_parse_job_checkpoint_columns(conn)?;
+
+    // 一个任务最多对应一个结果版本（version_id 由 job 派生，正常不会重复）。
+    // 若历史数据已存在重复，创建索引会失败；此时保留原数据并继续启动，由代码层再做校验。
+    let _ = conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_parse_jobs_version_unique
+         ON parse_jobs(version_id) WHERE version_id IS NOT NULL",
+        [],
+    );
+
     Ok(())
 }
 
-// ================= Tauri IPC Commands =================
+fn ensure_parse_job_checkpoint_columns(conn: &Connection) -> Result<(), String> {
+    let mut existing = std::collections::HashSet::new();
+    {
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(parse_jobs)")
+            .map_err(|e| format!("读取 parse_jobs 表结构失败: {}", e))?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(|e| format!("读取 parse_jobs 列名失败: {}", e))?;
+        for name in rows.flatten() {
+            existing.insert(name);
+        }
+    }
 
-#[tauri::command]
-pub fn db_get_or_create_document(
-    state: tauri::State<'_, DbState>,
-    file_path: String,
-    display_name: String,
+    let required: [(&str, &str); 7] = [
+        ("snapshot_rel_path", "TEXT"),
+        ("remote_submitted", "INTEGER NOT NULL DEFAULT 0"),
+        ("upload_completed", "INTEGER NOT NULL DEFAULT 0"),
+        ("artifacts_downloaded", "INTEGER NOT NULL DEFAULT 0"),
+        ("normalized_ready", "INTEGER NOT NULL DEFAULT 0"),
+        ("activation_baseline_version_id", "TEXT"),
+        ("submit_attempted", "INTEGER NOT NULL DEFAULT 0"),
+    ];
+
+    for (name, ddl) in required {
+        if !existing.contains(name) {
+            conn.execute(
+                &format!("ALTER TABLE parse_jobs ADD COLUMN {} {}", name, ddl),
+                [],
+            )
+            .map_err(|e| format!("为 parse_jobs 增加列 {} 失败: {}", name, e))?;
+        }
+    }
+    Ok(())
+}
+
+pub fn record_parsed_version(
+    conn: &mut Connection,
+    record: &ParsedDocumentVersionRecord,
+) -> Result<(), String> {
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("启动 SQLite 事务失败: {}", e))?;
+
+    // 1. 严格校验目标文档在 documents 表中是否存在
+    let doc_exists: bool = tx
+        .query_row(
+            "SELECT 1 FROM documents WHERE id = ?1",
+            params![record.document_id],
+            |_| Ok(true),
+        )
+        .optional()
+        .map_err(|e| format!("校验目标文档失败: {}", e))?
+        .unwrap_or(false);
+
+    if !doc_exists {
+        return Err(format!("目标文档不存在: {}", record.document_id));
+    }
+
+    // 2. 将当前文档所有旧版本置为 is_active = 0 (仅当新版本要激活时)
+    if record.is_active == 1 {
+        tx.execute(
+            "UPDATE parsed_document_versions SET is_active = 0 WHERE document_id = ?1 AND is_active = 1",
+            params![record.document_id],
+        )
+        .map_err(|e| format!("更新旧解析版本状态失败: {}", e))?;
+    }
+
+    // 3. 插入新版本记录并激活
+    tx.execute(
+        "INSERT INTO parsed_document_versions (version_id, document_id, source_revision, provider, config_signature, storage_rel_path, block_count, asset_count, is_active, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            record.version_id,
+            record.document_id,
+            record.source_revision,
+            record.provider,
+            record.config_signature,
+            record.storage_rel_path,
+            record.block_count,
+            record.asset_count,
+            record.is_active,
+            record.created_at,
+        ],
+    )
+    .map_err(|e| format!("保存解析版本记录失败: {}", e))?;
+
+    tx.commit()
+        .map_err(|e| format!("提交解析版本事务失败: {}", e))?;
+
+    Ok(())
+}
+
+/// 条件化登记解析版本并激活：
+/// 仅当源文件 revision 未变且当前激活版本符合启动时的预期时，才自动激活新版本；
+/// 若期间发生源文件修改或用户另行激活了其他版本，仍保存该解析版本，但保持 is_active = 0。
+/// 返回值：Ok(true) 表示新版本已成功激活；Ok(false) 表示已保存为非激活版本。
+pub fn record_parsed_version_conditional(
+    conn: &mut Connection,
+    record: &ParsedDocumentVersionRecord,
+    expected_doc_revision: &str,
+    expected_active_version_id: Option<&str>,
+) -> Result<bool, String> {
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("启动 SQLite 事务失败: {}", e))?;
+
+    let activated = record_version_in_tx(&tx, record, expected_doc_revision, expected_active_version_id)?;
+
+    tx.commit()
+        .map_err(|e| format!("提交解析版本事务失败: {}", e))?;
+
+    Ok(activated)
+}
+
+/// 版本登记与“任务成功”更新在同一事务内完成：
+/// 任一步失败都会整体回滚，重试不会产生第二个版本，也不会出现“版本已登记但任务仍非成功”。
+pub fn record_parsed_version_and_finish_job(
+    conn: &mut Connection,
+    record: &ParsedDocumentVersionRecord,
+    expected_doc_revision: &str,
+    expected_active_version_id: Option<&str>,
+    job_id: &str,
+    allow_activation: bool,
+) -> Result<bool, String> {
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("启动入库事务失败: {}", e))?;
+
+    // 源修订已变化或用户已选择其它版本时，仍保存结果但不自动替换当前激活版本。
+    let activation_guard: Option<&str> = if allow_activation {
+        expected_active_version_id
+    } else {
+        Some("__source_or_selection_changed__")
+    };
+
+    let activated = record_version_in_tx(&tx, record, expected_doc_revision, activation_guard)?;
+
+    let updated = tx
+        .execute(
+            "UPDATE parse_jobs SET
+                status = 'succeeded', version_id = ?1, activated = ?2,
+                can_cancel = 0, can_resume = 0, progress_percent = 100,
+                error_code = NULL, error_message = NULL,
+                update_seq = update_seq + 1, updated_at = ?3
+             WHERE job_id = ?4 AND status = 'importing'",
+            params![record.version_id, if activated { 1 } else { 0 }, now_ms(), job_id],
+        )
+        .map_err(|e| format!("更新任务成功状态失败: {}", e))?;
+
+    if updated != 1 {
+        // 任务在入库期间已被取消或已被其它执行者推进，放弃本次登记（事务回滚）
+        return Err("任务状态已变化（可能已取消），放弃本次入库登记".to_string());
+    }
+
+    tx.commit()
+        .map_err(|e| format!("提交入库事务失败: {}", e))?;
+
+    Ok(activated)
+}
+
+fn record_version_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    record: &ParsedDocumentVersionRecord,
+    expected_doc_revision: &str,
+    expected_active_version_id: Option<&str>,
+) -> Result<bool, String> {
+    // 1. 校验文档存在且 revision 未改变
+    let doc_rev: Option<String> = tx
+        .query_row(
+            "SELECT revision FROM documents WHERE id = ?1",
+            params![record.document_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| format!("校验目标文档失败: {}", e))?;
+
+    let doc_rev = match doc_rev {
+        Some(r) => r,
+        None => return Err(format!("目标文档不存在: {}", record.document_id)),
+    };
+
+    let doc_revision_matches = doc_rev == expected_doc_revision;
+
+    // 2. 检查当前 active 版本是否与任务创建时固定的基准一致
+    let current_active_ver: Option<String> = tx
+        .query_row(
+            "SELECT version_id FROM parsed_document_versions WHERE document_id = ?1 AND is_active = 1",
+            params![record.document_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| format!("查询当前激活版本失败: {}", e))?;
+
+    let active_version_matches = match (expected_active_version_id, current_active_ver.as_deref()) {
+        (None, None) => true,
+        (Some(expected), Some(current)) => expected == current,
+        (None, Some(_)) => false, // 任务创建时无激活版本，但期间有版本被激活了
+        (Some(_), None) => false, // 任务创建时有激活版本，但期间被移除了
+    };
+
+    let should_activate = doc_revision_matches && active_version_matches;
+
+    if should_activate {
+        tx.execute(
+            "UPDATE parsed_document_versions SET is_active = 0 WHERE document_id = ?1 AND is_active = 1",
+            params![record.document_id],
+        )
+        .map_err(|e| format!("更新旧解析版本状态失败: {}", e))?;
+    }
+
+    let is_active_val = if should_activate { 1 } else { 0 };
+
+    tx.execute(
+        "INSERT INTO parsed_document_versions (version_id, document_id, source_revision, provider, config_signature, storage_rel_path, block_count, asset_count, is_active, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            record.version_id,
+            record.document_id,
+            record.source_revision,
+            record.provider,
+            record.config_signature,
+            record.storage_rel_path,
+            record.block_count,
+            record.asset_count,
+            is_active_val,
+            record.created_at,
+        ],
+    )
+    .map_err(|e| format!("保存解析版本记录失败: {}", e))?;
+
+    Ok(should_activate)
+}
+
+pub fn get_active_parsed_version(
+    conn: &Connection,
+    document_id: &str,
+) -> Result<Option<ParsedDocumentVersionRecord>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT version_id, document_id, source_revision, provider, config_signature, storage_rel_path, block_count, asset_count, is_active, created_at
+             FROM parsed_document_versions
+             WHERE document_id = ?1 AND is_active = 1
+             ORDER BY created_at DESC
+             LIMIT 1",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let row = stmt
+        .query_row(params![document_id], |r| {
+            Ok(ParsedDocumentVersionRecord {
+                version_id: r.get(0)?,
+                document_id: r.get(1)?,
+                source_revision: r.get(2)?,
+                provider: r.get(3)?,
+                config_signature: r.get(4)?,
+                storage_rel_path: r.get(5)?,
+                block_count: r.get(6)?,
+                asset_count: r.get(7)?,
+                is_active: r.get(8)?,
+                created_at: r.get(9)?,
+            })
+        })
+        .optional()
+        .map_err(|e| format!("查询激活解析版本失败: {}", e))?;
+
+    Ok(row)
+}
+
+// ================= App Settings =================
+
+pub fn get_app_setting(conn: &Connection, key: &str) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT value FROM app_settings WHERE key = ?1",
+        params![key],
+        |r| r.get(0),
+    )
+    .optional()
+    .map_err(|e| format!("获取应用设置失败: {}", e))
+}
+
+pub fn set_app_setting(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
+    let now = now_ms();
+    conn.execute(
+        "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, ?3)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        params![key, value, now],
+    )
+    .map_err(|e| format!("保存应用设置失败: {}", e))?;
+    Ok(())
+}
+
+// ================= Parse Jobs Database Helpers =================
+
+pub const PARSE_JOB_SELECT_FIELDS: &str = "\
+    job_id, document_id, source_path, document_name, source_hash, source_revision, \
+    provider, config_signature, status, progress_percent, completed_pages, total_pages, \
+    remote_id, remote_meta_json, version_id, activated, can_cancel, can_resume, \
+    error_code, error_message, update_seq, created_at, updated_at, \
+    snapshot_rel_path, remote_submitted, upload_completed, artifacts_downloaded, \
+    normalized_ready, activation_baseline_version_id, submit_attempted";
+
+pub fn map_parse_job_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ParseJobRecord> {
+    Ok(ParseJobRecord {
+        job_id: row.get(0)?,
+        document_id: row.get(1)?,
+        source_path: row.get(2)?,
+        document_name: row.get(3)?,
+        source_hash: row.get(4)?,
+        source_revision: row.get(5)?,
+        provider: row.get(6)?,
+        config_signature: row.get(7)?,
+        status: row.get(8)?,
+        progress_percent: row.get(9)?,
+        completed_pages: row.get(10)?,
+        total_pages: row.get(11)?,
+        remote_id: row.get(12)?,
+        remote_meta_json: row.get(13)?,
+        version_id: row.get(14)?,
+        activated: row.get(15)?,
+        can_cancel: row.get(16)?,
+        can_resume: row.get(17)?,
+        error_code: row.get(18)?,
+        error_message: row.get(19)?,
+        update_seq: row.get(20)?,
+        created_at: row.get(21)?,
+        updated_at: row.get(22)?,
+        snapshot_rel_path: row.get(23)?,
+        remote_submitted: row.get(24)?,
+        upload_completed: row.get(25)?,
+        artifacts_downloaded: row.get(26)?,
+        normalized_ready: row.get(27)?,
+        activation_baseline_version_id: row.get(28)?,
+        submit_attempted: row.get(29)?,
+    })
+}
+
+pub fn insert_parse_job(conn: &Connection, job: &ParseJobRecord) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO parse_jobs (
+            job_id, document_id, source_path, document_name, source_hash, source_revision,
+            provider, config_signature, status, progress_percent, completed_pages, total_pages,
+            remote_id, remote_meta_json, version_id, activated, can_cancel, can_resume,
+            error_code, error_message, update_seq, created_at, updated_at,
+            snapshot_rel_path, remote_submitted, upload_completed, artifacts_downloaded,
+            normalized_ready, activation_baseline_version_id, submit_attempted
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6,
+            ?7, ?8, ?9, ?10, ?11, ?12,
+            ?13, ?14, ?15, ?16, ?17, ?18,
+            ?19, ?20, ?21, ?22, ?23,
+            ?24, ?25, ?26, ?27, ?28, ?29, ?30
+        )",
+        params![
+            job.job_id, job.document_id, job.source_path, job.document_name, job.source_hash, job.source_revision,
+            job.provider, job.config_signature, job.status, job.progress_percent, job.completed_pages, job.total_pages,
+            job.remote_id, job.remote_meta_json, job.version_id, job.activated, job.can_cancel, job.can_resume,
+            job.error_code, job.error_message, job.update_seq, job.created_at, job.updated_at,
+            job.snapshot_rel_path, job.remote_submitted, job.upload_completed,
+            job.artifacts_downloaded, job.normalized_ready, job.activation_baseline_version_id,
+            job.submit_attempted
+        ],
+    )
+    .map_err(|e| format!("插入解析任务失败: {}", e))?;
+    Ok(())
+}
+
+pub fn update_parse_job(conn: &Connection, job: &ParseJobRecord) -> Result<(), String> {
+    conn.execute(
+        "UPDATE parse_jobs SET
+            status = ?1, progress_percent = ?2, completed_pages = ?3, total_pages = ?4,
+            remote_id = ?5, remote_meta_json = ?6, version_id = ?7, activated = ?8,
+            can_cancel = ?9, can_resume = ?10, error_code = ?11, error_message = ?12,
+            snapshot_rel_path = ?13, remote_submitted = ?14, upload_completed = ?15,
+            artifacts_downloaded = ?16, normalized_ready = ?17,
+            activation_baseline_version_id = ?18, submit_attempted = ?19,
+            update_seq = update_seq + 1, updated_at = ?20
+         WHERE job_id = ?21",
+        params![
+            job.status, job.progress_percent, job.completed_pages, job.total_pages,
+            job.remote_id, job.remote_meta_json, job.version_id, job.activated,
+            job.can_cancel, job.can_resume, job.error_code, job.error_message,
+            job.snapshot_rel_path, job.remote_submitted, job.upload_completed,
+            job.artifacts_downloaded, job.normalized_ready, job.activation_baseline_version_id,
+            job.submit_attempted, now_ms(), job.job_id
+        ],
+    )
+    .map_err(|e| format!("更新解析任务失败: {}", e))?;
+    Ok(())
+}
+
+/// 检查点写入（与状态转换分离）：
+/// 只更新“恢复所需”的本地进度字段，绝不改写 status / can_cancel / can_resume / 终态信息。
+/// 通过 `expected_status` 与 `update_seq` 做原子条件校验；影响行数不为 1 时返回错误，
+/// 调用方必须立刻停止当前执行（例如任务已被取消）。
+pub fn update_parse_job_checkpoint(
+    conn: &Connection,
+    job: &ParseJobRecord,
+    expected_status: &str,
+) -> Result<i64, String> {
+    let (current_status, current_seq): (String, i64) = conn
+        .query_row(
+            "SELECT status, update_seq FROM parse_jobs WHERE job_id = ?1",
+            params![job.job_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|e| format!("读取任务状态失败: {}", e))?;
+
+    if current_status != expected_status {
+        return Err(format!(
+            "任务状态已变化（期望 '{}'，实际 '{}'），停止当前执行",
+            expected_status, current_status
+        ));
+    }
+
+    let updated = conn
+        .execute(
+            "UPDATE parse_jobs SET
+                snapshot_rel_path = ?1, remote_id = ?2, remote_meta_json = ?3,
+                submit_attempted = ?4, remote_submitted = ?5, upload_completed = ?6,
+                artifacts_downloaded = ?7, normalized_ready = ?8,
+                update_seq = update_seq + 1, updated_at = ?9
+             WHERE job_id = ?10 AND status = ?11 AND update_seq = ?12",
+            params![
+                job.snapshot_rel_path,
+                job.remote_id,
+                job.remote_meta_json,
+                job.submit_attempted,
+                job.remote_submitted,
+                job.upload_completed,
+                job.artifacts_downloaded,
+                job.normalized_ready,
+                now_ms(),
+                job.job_id,
+                expected_status,
+                current_seq
+            ],
+        )
+        .map_err(|e| format!("写入任务检查点失败: {}", e))?;
+
+    if updated != 1 {
+        return Err("检查点写入冲突：任务已被其它执行者推进".to_string());
+    }
+
+    Ok(current_seq + 1)
+}
+
+/// 仅在任务仍处于预期状态时写回整条记录（用于入库失败等终态收尾）。
+/// 状态已变化时返回 false，调用方不得重试覆盖。
+pub fn update_parse_job_if_status(
+    conn: &Connection,
+    job: &ParseJobRecord,
+    expected_status: &str,
+) -> Result<bool, String> {
+    let updated = conn
+        .execute(
+            "UPDATE parse_jobs SET
+                status = ?1, progress_percent = ?2, completed_pages = ?3, total_pages = ?4,
+                remote_id = ?5, remote_meta_json = ?6, version_id = ?7, activated = ?8,
+                can_cancel = ?9, can_resume = ?10, error_code = ?11, error_message = ?12,
+                snapshot_rel_path = ?13, submit_attempted = ?14, remote_submitted = ?15,
+                upload_completed = ?16, artifacts_downloaded = ?17, normalized_ready = ?18,
+                activation_baseline_version_id = ?19,
+                update_seq = update_seq + 1, updated_at = ?20
+             WHERE job_id = ?21 AND status = ?22",
+            params![
+                job.status,
+                job.progress_percent,
+                job.completed_pages,
+                job.total_pages,
+                job.remote_id,
+                job.remote_meta_json,
+                job.version_id,
+                job.activated,
+                job.can_cancel,
+                job.can_resume,
+                job.error_code,
+                job.error_message,
+                job.snapshot_rel_path,
+                job.submit_attempted,
+                job.remote_submitted,
+                job.upload_completed,
+                job.artifacts_downloaded,
+                job.normalized_ready,
+                job.activation_baseline_version_id,
+                now_ms(),
+                job.job_id,
+                expected_status
+            ],
+        )
+        .map_err(|e| format!("更新解析任务失败: {}", e))?;
+    Ok(updated == 1)
+}
+
+/// 阶段推进：仅当任务未进入入库/未结束/未取消时才允许改写状态。
+/// 返回 false 表示任务已被取消或已结束，工作流必须立刻停止，不能覆盖既有状态。
+pub fn transition_parse_job_status(
+    conn: &Connection,
+    job_id: &str,
+    to_status: &str,
+    can_cancel: i64,
+    can_resume: i64,
+    error_code: Option<&str>,
+    error_message: Option<&str>,
+) -> Result<bool, String> {
+    let updated = conn
+        .execute(
+            "UPDATE parse_jobs SET
+                status = ?1, progress_percent = NULL, can_cancel = ?2, can_resume = ?3,
+                error_code = ?4, error_message = ?5,
+                update_seq = update_seq + 1, updated_at = ?6
+             WHERE job_id = ?7
+               AND status NOT IN ('importing', 'succeeded', 'cancelled')",
+            params![
+                to_status,
+                can_cancel,
+                can_resume,
+                error_code,
+                error_message,
+                now_ms(),
+                job_id
+            ],
+        )
+        .map_err(|e| format!("推进解析任务状态失败: {}", e))?;
+    Ok(updated == 1)
+}
+
+/// 进度更新结果：仅在合法的 processing 状态下允许原子推进页数与 update_seq
+#[derive(Debug, PartialEq, Eq)]
+pub enum ProgressUpdateOutcome {
+    /// 成功更新页数并自增 update_seq，携带新的序号
+    Updated(i64),
+    /// 任务已脱离 processing 状态（如已被取消或已完成），拒绝写入
+    NotProcessing,
+    /// 页数无有效实质变更，跳过写入与序号递增
+    NoChange,
+}
+
+/// 受状态保护的原子进度更新：
+/// 1. 只有当前任务处于 'processing' 状态才允许写入；
+/// 2. 页数发生有效变化时，在同一 SQL 更新中递增 update_seq 并更新 updated_at；
+/// 3. 保留已有有效值，不因服务商未返回某可选字段而清空已有值；
+/// 4. 明确区分 Updated、NotProcessing、NoChange 与数据库错误；
+/// 5. 终态任务绝不被迟到的进度响应污染。
+pub fn update_parse_job_progress(
+    conn: &Connection,
+    job_id: &str,
+    completed_pages: Option<i64>,
+    total_pages: Option<i64>,
+) -> Result<ProgressUpdateOutcome, String> {
+    let row = conn
+        .query_row(
+            "SELECT status, completed_pages, total_pages, update_seq FROM parse_jobs WHERE job_id = ?1",
+            params![job_id],
+            |r| Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<i64>>(1)?,
+                r.get::<_, Option<i64>>(2)?,
+                r.get::<_, i64>(3)?,
+            )),
+        )
+        .optional()
+        .map_err(|e| format!("查询任务状态失败: {}", e))?;
+
+    let (current_status, current_completed, current_total, current_seq) = match row {
+        Some(data) => data,
+        None => return Err(format!("任务不存在: {}", job_id)),
+    };
+
+    if current_status != "processing" {
+        return Ok(ProgressUpdateOutcome::NotProcessing);
+    }
+
+    // 保留已有有效值：若传入为 None，则继承现有值，不无故清空已有有效值
+    let effective_completed = completed_pages.or(current_completed);
+    let effective_total = total_pages.or(current_total);
+
+    if effective_completed == current_completed && effective_total == current_total {
+        return Ok(ProgressUpdateOutcome::NoChange);
+    }
+
+    let now = now_ms();
+    let updated = conn
+        .execute(
+            "UPDATE parse_jobs SET
+                completed_pages = ?1,
+                total_pages = ?2,
+                update_seq = update_seq + 1,
+                updated_at = ?3
+             WHERE job_id = ?4 AND status = 'processing' AND update_seq = ?5",
+            params![effective_completed, effective_total, now, job_id, current_seq],
+        )
+        .map_err(|e| format!("更新任务进度失败: {}", e))?;
+
+    if updated == 1 {
+        Ok(ProgressUpdateOutcome::Updated(current_seq + 1))
+    } else {
+        // 重新检查当前状态，判断是脱离了 processing 还是并发 CAS 冲突
+        let recheck_status: Option<String> = conn
+            .query_row(
+                "SELECT status FROM parse_jobs WHERE job_id = ?1",
+                params![job_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| format!("重新检查任务状态失败: {}", e))?;
+
+        match recheck_status.as_deref() {
+            Some("processing") => Err("进度更新冲突：任务已被其它操作并发推进".to_string()),
+            Some(_) => Ok(ProgressUpdateOutcome::NotProcessing),
+            None => Err(format!("任务不存在: {}", job_id)),
+        }
+    }
+}
+
+/// 取消结果：取消先成功才允许真正取消；入库已取得执行权时取消被拒绝。
+#[derive(Debug)]
+pub enum CancelOutcome {
+    Cancelled(ParseJobRecord),
+    /// 任务已进入入库阶段或已结束，返回当前状态
+    Rejected(ParseJobRecord),
+    NotFound,
+}
+
+/// 原子取消：状态条件更新与“是否允许取消”是同一个 SQL 语句，
+/// 不存在“检查完再取消”的竞态窗口。
+pub fn cancel_parse_job_cas(conn: &Connection, job_id: &str) -> Result<CancelOutcome, String> {
+    let updated = conn
+        .execute(
+            "UPDATE parse_jobs SET
+                status = 'cancelled', can_cancel = 0, can_resume = 0,
+                error_code = 'ERR_CANCELLED', error_message = '任务已被用户取消',
+                update_seq = update_seq + 1, updated_at = ?1
+             WHERE job_id = ?2
+               AND status NOT IN ('importing', 'succeeded', 'cancelled')",
+            params![now_ms(), job_id],
+        )
+        .map_err(|e| format!("取消解析任务失败: {}", e))?;
+
+    let job = get_parse_job(conn, job_id)?;
+    match (updated, job) {
+        (_, None) => Ok(CancelOutcome::NotFound),
+        (1, Some(j)) => Ok(CancelOutcome::Cancelled(j)),
+        (_, Some(j)) => Ok(CancelOutcome::Rejected(j)),
+    }
+}
+
+/// 入库执行权：仅当任务仍处于 normalizing 时才能进入 importing。
+/// 与取消使用同一条记录的条件更新，谁先成功谁生效。
+pub fn try_begin_parse_import(conn: &Connection, job_id: &str) -> Result<bool, String> {
+    let updated = conn
+        .execute(
+            "UPDATE parse_jobs SET
+                status = 'importing', can_cancel = 0, can_resume = 0,
+                progress_percent = NULL,
+                update_seq = update_seq + 1, updated_at = ?1
+             WHERE job_id = ?2 AND status = 'normalizing'",
+            params![now_ms(), job_id],
+        )
+        .map_err(|e| format!("取得入库执行权失败: {}", e))?;
+    Ok(updated == 1)
+}
+
+/// 应用启动时的中断恢复：
+/// 1. 已经发出提交意图但没有可靠远端 ID → `submission_unknown`（绝不重新提交）；
+/// 2. 迁移前的旧记录处于“提交之后”的状态却缺少远端 ID → 保守视为可能已受理；
+/// 3. 其余中间态 → `paused`（可继续）。
+/// 全部为幂等更新：处理过的记录不会再匹配同一条件。
+pub fn recover_interrupted_parse_jobs(conn: &Connection) -> Result<usize, String> {
+    let now = now_ms();
+    let mut total = 0usize;
+
+    // 1. 新代码留下的“可能已受理但未保存远端 ID”
+    total += conn
+        .execute(
+            "UPDATE parse_jobs SET
+                status = 'submission_unknown', can_cancel = 0, can_resume = 0,
+                progress_percent = NULL,
+                error_code = 'ERR_SUBMISSION_UNCONFIRMED',
+                error_message = '上次提交在保存远端标识前中断，无法确认服务商是否已受理；请核对后使用“重新解析”',
+                update_seq = update_seq + 1, updated_at = ?1
+             WHERE submit_attempted = 1 AND remote_submitted = 0 AND remote_id IS NULL
+               AND status IN ('preparing', 'submitting', 'uploading', 'processing', 'downloading', 'normalizing', 'importing')",
+            params![now],
+        )
+        .map_err(|e| format!("恢复未确认的提交任务失败: {}", e))?;
+
+    // 2. 迁移前的旧记录：已进入提交之后的状态但无远端 ID。
+    //    无法判断服务商是否受理 → 保守标记为待确认，并补写 submit_attempted=1，
+    //    避免后续再次进入普通恢复流程。
+    total += conn
+        .execute(
+            "UPDATE parse_jobs SET
+                submit_attempted = 1, status = 'submission_unknown',
+                can_cancel = 0, can_resume = 0, progress_percent = NULL,
+                error_code = 'ERR_SUBMISSION_UNCONFIRMED',
+                error_message = '升级前任务在提交阶段中断，无法确认服务商是否已受理；请核对后使用“重新解析”',
+                update_seq = update_seq + 1, updated_at = ?1
+             WHERE submit_attempted = 0 AND remote_submitted = 0 AND remote_id IS NULL
+               AND status IN ('submitting', 'uploading', 'processing', 'downloading', 'normalizing', 'importing')",
+            params![now],
+        )
+        .map_err(|e| format!("迁移旧的未确认提交任务失败: {}", e))?;
+
+    // 3. 迁移前的旧 paused 记录：排除“明确发生在提交之前”的暂停
+    //    （未配置凭据 / 认证被拒），其余无法判断者同样保守处理。
+    total += conn
+        .execute(
+            "UPDATE parse_jobs SET
+                submit_attempted = 1, status = 'submission_unknown',
+                can_cancel = 0, can_resume = 0, progress_percent = NULL,
+                error_code = 'ERR_SUBMISSION_UNCONFIRMED',
+                error_message = '升级前任务在提交阶段中断，无法确认服务商是否已受理；请核对后使用“重新解析”',
+                update_seq = update_seq + 1, updated_at = ?1
+             WHERE submit_attempted = 0 AND remote_submitted = 0 AND remote_id IS NULL
+               AND status = 'paused'
+               AND (error_code IS NULL OR error_code NOT IN ('ERR_AUTH_REJECTED', 'ERR_CREDENTIAL_STORE'))",
+            params![now],
+        )
+        .map_err(|e| format!("迁移旧暂停任务失败: {}", e))?;
+
+    // 4. 其余中间态 → 可继续
+    total += conn
+        .execute(
+            "UPDATE parse_jobs SET
+                status = 'paused', can_cancel = 1, can_resume = 1,
+                progress_percent = NULL,
+                error_code = 'ERR_INTERRUPTED',
+                error_message = '应用退出导致任务中断，可点击“继续任务”从检查点恢复',
+                update_seq = update_seq + 1, updated_at = ?1
+             WHERE status IN ('preparing', 'submitting', 'uploading', 'processing', 'downloading', 'normalizing', 'importing')",
+            params![now],
+        )
+        .map_err(|e| format!("恢复中断的解析任务失败: {}", e))?;
+
+    Ok(total)
+}
+
+/// 按结果版本反查任务，保证 job_id ↔ version_id 的唯一关联可核对。
+pub fn find_parse_job_by_version(
+    conn: &Connection,
+    version_id: &str,
+) -> Result<Option<ParseJobRecord>, String> {
+    let sql = format!(
+        "SELECT {} FROM parse_jobs WHERE version_id = ?1 LIMIT 1",
+        PARSE_JOB_SELECT_FIELDS
+    );
+    conn.query_row(
+        &sql,
+        params![version_id],
+        map_parse_job_row,
+    )
+    .optional()
+    .map_err(|e| format!("查询解析版本对应的任务失败: {}", e))
+}
+
+pub fn get_parse_job(conn: &Connection, job_id: &str) -> Result<Option<ParseJobRecord>, String> {
+    let sql = format!(
+        "SELECT {} FROM parse_jobs WHERE job_id = ?1",
+        PARSE_JOB_SELECT_FIELDS
+    );
+    conn.query_row(
+        &sql,
+        params![job_id],
+        map_parse_job_row,
+    )
+    .optional()
+    .map_err(|e| format!("查询解析任务失败: {}", e))
+}
+
+/// 获取下一条排队的解析任务（按创建时间先后顺序 FIFO）：
+/// 只有确实没有排队任务才返回 Ok(None)；SQL、列映射、锁错误等均作为 Err 向上传播，
+/// 绝不被隐式吞掉转成 None。
+pub fn get_next_queued_job(conn: &Connection) -> Result<Option<ParseJobRecord>, String> {
+    let sql = format!(
+        "SELECT {} FROM parse_jobs WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1",
+        PARSE_JOB_SELECT_FIELDS
+    );
+    conn.query_row(&sql, [], map_parse_job_row)
+        .optional()
+        .map_err(|e| format!("查询下一条排队任务失败: {}", e))
+}
+
+/// 只在同一文档（同一路径）内复用任务：
+/// 相同字节但不同路径的文件必须拥有各自的文档身份与版本绑定。
+pub fn find_active_parse_job(
+    conn: &Connection,
+    document_id: &str,
+    source_path: &str,
+    source_hash: &str,
+    provider: &str,
+    config_signature: &str,
+) -> Result<Option<ParseJobRecord>, String> {
+    let sql = format!(
+        "SELECT {}
+         FROM parse_jobs
+         WHERE source_hash = ?1 AND provider = ?2 AND config_signature = ?3
+           AND document_id = ?4 AND source_path = ?5
+           AND status IN ('queued', 'preparing', 'submitting', 'uploading', 'processing', 'downloading', 'normalizing', 'importing', 'paused', 'submission_unknown')
+         ORDER BY created_at DESC LIMIT 1",
+        PARSE_JOB_SELECT_FIELDS
+    );
+    conn.query_row(
+        &sql,
+        params![source_hash, provider, config_signature, document_id, source_path],
+        map_parse_job_row,
+    )
+    .optional()
+    .map_err(|e| format!("查询活跃解析任务失败: {}", e))
+}
+
+pub fn find_latest_succeeded_job(
+    conn: &Connection,
+    document_id: &str,
+    source_path: &str,
+    source_hash: &str,
+    provider: &str,
+    config_signature: &str,
+) -> Result<Option<ParseJobRecord>, String> {
+    let sql = format!(
+        "SELECT {}
+         FROM parse_jobs
+         WHERE source_hash = ?1 AND provider = ?2 AND config_signature = ?3
+           AND document_id = ?4 AND source_path = ?5
+           AND status = 'succeeded' AND version_id IS NOT NULL
+         ORDER BY created_at DESC LIMIT 1",
+        PARSE_JOB_SELECT_FIELDS
+    );
+    conn.query_row(
+        &sql,
+        params![source_hash, provider, config_signature, document_id, source_path],
+        map_parse_job_row,
+    )
+    .optional()
+    .map_err(|e| format!("查询历史成功解析任务失败: {}", e))
+}
+
+pub fn list_parse_jobs_internal(
+    conn: &Connection,
+    document_id: Option<&str>,
+    active_only: bool,
+    limit: i64,
+    cursor: Option<&str>,
+) -> Result<(Vec<ParseJobRecord>, Option<String>), String> {
+    let limit = limit.clamp(1, 100);
+    let mut conditions = Vec::new();
+    let mut params_vec: Vec<rusqlite::types::Value> = Vec::new();
+
+    if let Some(doc_id) = document_id {
+        conditions.push("document_id = ?");
+        params_vec.push(rusqlite::types::Value::from(doc_id.to_string()));
+    }
+
+    if active_only {
+        conditions.push("status IN ('queued', 'preparing', 'submitting', 'uploading', 'processing', 'downloading', 'normalizing', 'importing', 'paused', 'submission_unknown')");
+    }
+
+    if let Some(c_str) = cursor {
+        use base64::Engine;
+        if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(c_str.trim()) {
+            if let Ok(s) = String::from_utf8(decoded) {
+                let parts: Vec<&str> = s.split(':').collect();
+                if parts.len() == 2 {
+                    if let Ok(c_time) = parts[0].parse::<i64>() {
+                        let c_id = parts[1].to_string();
+                        conditions.push("(created_at < ? OR (created_at = ? AND job_id < ?))");
+                        params_vec.push(rusqlite::types::Value::from(c_time));
+                        params_vec.push(rusqlite::types::Value::from(c_time));
+                        params_vec.push(rusqlite::types::Value::from(c_id));
+                    }
+                }
+            }
+        }
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    };
+
+    let sql = format!(
+        "SELECT {}
+         FROM parse_jobs
+         {}
+         ORDER BY created_at DESC, job_id DESC
+         LIMIT ?",
+        PARSE_JOB_SELECT_FIELDS,
+        where_clause
+    );
+
+    params_vec.push(rusqlite::types::Value::from(limit + 1));
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let params_slice: Vec<&dyn rusqlite::ToSql> = params_vec
+        .iter()
+        .map(|v| v as &dyn rusqlite::ToSql)
+        .collect();
+
+    let rows = stmt
+        .query_map(&params_slice[..], map_parse_job_row)
+        .map_err(|e| format!("查询任务列表失败: {}", e))?;
+
+    let mut items = Vec::new();
+    for r in rows {
+        items.push(r.map_err(|e| e.to_string())?);
+    }
+
+    let has_more = items.len() > (limit as usize);
+    let next_cursor = if has_more {
+        items.truncate(limit as usize);
+        items.last().map(|last| {
+            use base64::Engine;
+            let raw = format!("{}:{}", last.created_at, last.job_id);
+            base64::engine::general_purpose::STANDARD.encode(raw)
+        })
+    } else {
+        None
+    };
+
+    Ok((items, next_cursor))
+}
+
+// ================= Documents Helper =================
+
+pub fn get_or_create_document_internal(
+    conn: &Connection,
+    file_path: &str,
+    display_name: &str,
     file_size: i64,
-    revision: Option<String>,
+    revision: Option<&str>,
 ) -> Result<DocumentRecord, String> {
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let rev = revision.unwrap_or_default();
     let now = now_ms();
 
@@ -343,8 +1461,8 @@ pub fn db_get_or_create_document(
                 params![display_name, rev, file_size, now, doc.id],
             )
             .map_err(|e| format!("更新文档元数据失败: {}", e))?;
-            doc.display_name = display_name;
-            doc.revision = rev;
+            doc.display_name = display_name.to_string();
+            doc.revision = rev.to_string();
             doc.file_size = file_size;
             doc.updated_at = now;
         }
@@ -362,14 +1480,28 @@ pub fn db_get_or_create_document(
 
     Ok(DocumentRecord {
         id: doc_id,
-        file_path,
-        display_name,
+        file_path: file_path.to_string(),
+        display_name: display_name.to_string(),
         file_size,
-        revision: rev,
+        revision: rev.to_string(),
         last_read_position: None,
         created_at: now,
         updated_at: now,
     })
+}
+
+// ================= Tauri IPC Commands =================
+
+#[tauri::command]
+pub fn db_get_or_create_document(
+    state: tauri::State<'_, DbState>,
+    file_path: String,
+    display_name: String,
+    file_size: i64,
+    revision: Option<String>,
+) -> Result<DocumentRecord, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    get_or_create_document_internal(&conn, &file_path, &display_name, file_size, revision.as_deref())
 }
 
 #[tauri::command]
@@ -1212,13 +2344,11 @@ fn cleanup_anchor_and_assets(conn: &Connection, assets_dir: &std::path::Path, an
     }
 }
 
-#[tauri::command]
-pub fn db_delete_card(
-    state: tauri::State<'_, DbState>,
-    card_id: String,
+pub fn delete_card_internal(
+    conn: &Connection,
+    assets_dir: &std::path::Path,
+    card_id: &str,
 ) -> Result<(), String> {
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-
     // 获取 anchor_id，看是否还有其他卡片或高亮共享该 anchor
     let anchor_id: Option<String> = conn
         .query_row(
@@ -1251,11 +2381,20 @@ pub fn db_delete_card(
             .unwrap_or(0);
 
         if card_ref_count == 0 && hl_ref_count == 0 {
-            cleanup_anchor_and_assets(&conn, &state.assets_dir, &anc_id);
+            cleanup_anchor_and_assets(conn, assets_dir, &anc_id);
         }
     }
 
     Ok(())
+}
+
+#[tauri::command]
+pub fn db_delete_card(
+    state: tauri::State<'_, DbState>,
+    card_id: String,
+) -> Result<(), String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    delete_card_internal(&conn, &state.assets_dir, &card_id)
 }
 
 #[tauri::command]
@@ -2278,5 +3417,60 @@ mod tests {
         assert_eq!(detail_2.function_results.len(), 1);
         assert_eq!(detail_2.function_results[0].result_content, "卡片2专属翻译");
     }
-}
 
+    #[test]
+    fn test_parse_job_checkpoint_columns_migrate_existing_database() {
+        let conn = Connection::open_in_memory().unwrap();
+        // 模拟上一版本已经创建、但没有检查点列的数据库
+        conn.execute_batch(
+            "CREATE TABLE parse_jobs (
+                job_id TEXT PRIMARY KEY,
+                document_id TEXT NOT NULL,
+                source_path TEXT NOT NULL,
+                document_name TEXT NOT NULL,
+                source_hash TEXT NOT NULL,
+                source_revision TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                config_signature TEXT NOT NULL,
+                status TEXT NOT NULL,
+                progress_percent INTEGER,
+                completed_pages INTEGER,
+                total_pages INTEGER,
+                remote_id TEXT,
+                remote_meta_json TEXT,
+                version_id TEXT,
+                activated INTEGER NOT NULL DEFAULT 0,
+                can_cancel INTEGER NOT NULL DEFAULT 0,
+                can_resume INTEGER NOT NULL DEFAULT 0,
+                error_code TEXT,
+                error_message TEXT,
+                update_seq INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );",
+        )
+        .unwrap();
+
+        // 迁移必须幂等补齐检查点列（不丢旧数据）
+        run_migrations(&conn).unwrap();
+        run_migrations(&conn).unwrap();
+
+        let mut stmt = conn.prepare("PRAGMA table_info(parse_jobs)").unwrap();
+        let columns: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .flatten()
+            .collect();
+        for expected in [
+            "snapshot_rel_path",
+            "remote_submitted",
+            "upload_completed",
+            "artifacts_downloaded",
+            "normalized_ready",
+            "activation_baseline_version_id",
+            "submit_attempted",
+        ] {
+            assert!(columns.iter().any(|c| c == expected), "缺少列 {}", expected);
+        }
+    }
+}

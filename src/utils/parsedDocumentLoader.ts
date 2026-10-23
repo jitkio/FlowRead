@@ -27,7 +27,8 @@ export function normalizeBlockType(rawType: unknown): ParsedBlockType {
   if (s === "table") return "table";
   if (s === "caption" || s === "figure_caption" || s === "chart_caption") return "caption";
   if (s === "page_header" || s === "pageheader") return "page_header";
-  if (s === "page_number" || s === "pagefooter" || s === "footer") return "page_number";
+  if (s === "page_number") return "page_number";
+  if (s === "page_footer" || s === "footer" || s === "pagefooter") return "page_footer";
 
   return "unknown";
 }
@@ -129,6 +130,18 @@ export function validateParsedBlocks(
     // 校验图片与图注
     const assetRef = typeof item.asset_ref === "string" && item.asset_ref.trim() ? item.asset_ref.trim() : null;
     const caption = typeof item.caption === "string" && item.caption.trim() ? item.caption.trim() : null;
+    // 脚注说明文字（与 caption 同款写法：非空字符串才保留，其余一律 null）
+    const footnote =
+      typeof item.footnote === "string" && item.footnote.trim() ? item.footnote.trim() : null;
+    // 标题层级：仅 1-6 的合法整数保留；不强转（字符串 "3"、越界、小数一律丢弃为 null）
+    const rawHeadingLevel = item.heading_level;
+    const headingLevel =
+      typeof rawHeadingLevel === "number" &&
+      Number.isInteger(rawHeadingLevel) &&
+      rawHeadingLevel >= 1 &&
+      rawHeadingLevel <= 6
+        ? rawHeadingLevel
+        : null;
     const inImageText = Array.isArray(item.in_image_text)
       ? item.in_image_text.filter((t): t is string => typeof t === "string")
       : undefined;
@@ -141,13 +154,17 @@ export function validateParsedBlocks(
     else if (normalizedType === "image") stats.imageCount++;
     else if (normalizedType === "table") stats.tableCount++;
     else if (normalizedType === "caption") stats.captionCount++;
-    else if (normalizedType === "page_header" || normalizedType === "page_number") {
+    else if (normalizedType === "page_header" || normalizedType === "page_number" || normalizedType === "page_footer") {
       stats.pageHeaderFooterCount++;
     } else {
       stats.unknownCount++;
     }
 
-    if (normalizedType !== "page_header" && normalizedType !== "page_number") {
+    if (
+      normalizedType !== "page_header" &&
+      normalizedType !== "page_number" &&
+      normalizedType !== "page_footer"
+    ) {
       stats.renderableBlocks++;
     }
 
@@ -162,6 +179,8 @@ export function validateParsedBlocks(
       inline_runs: inlineRuns,
       asset_ref: assetRef,
       caption,
+      footnote,
+      heading_level: headingLevel,
       in_image_text: inImageText,
       page_sample: typeof item.page_sample === "number" ? item.page_sample : undefined,
       page_source: typeof item.page_source === "number" ? item.page_source : undefined,

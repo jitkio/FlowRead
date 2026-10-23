@@ -1,0 +1,585 @@
+/* ==========================================================================
+   PDF 云端解析流程：设置弹窗、导入面板、任务面板、轻提示
+   仅新增局部样式，不覆盖既有 App.css 规则
+   ========================================================================== */
+
+.parse-modal-card {
+  width: 620px;
+  max-width: 94vw;
+  max-height: 86vh;
+  background-color: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 2px;
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.18), 0 2px 6px rgba(15, 23, 42, 0.08);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: modalScaleUp 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.parse-jobs-modal {
+  width: 720px;
+}
+
+.parse-modal-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.parse-jobs-body {
+  gap: 10px;
+}
+
+.parse-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 20px;
+  border-top: 1px solid #e2e8f0;
+  background-color: #fafafa;
+}
+
+.parse-btn-small {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+/* ---------------------------- 设置弹窗 ---------------------------- */
+
+.parse-settings-default {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.parse-settings-label,
+.parse-field-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.parse-radio-group {
+  display: flex;
+  gap: 16px;
+}
+
+.parse-radio-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.parse-provider-section {
+  border: 1px solid #e2e8f0;
+  border-radius: 2px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background-color: #fcfcfd;
+}
+
+.parse-provider-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.parse-provider-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.parse-status-pill {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.parse-status-pill.is-configured {
+  color: #166534;
+  background-color: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.parse-status-pill.is-empty {
+  color: #92400e;
+  background-color: #fffbeb;
+  border-color: #fde68a;
+}
+
+.parse-token-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.parse-token-input,
+.parse-select {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 9px;
+  font-size: 13px;
+  font-family: var(--font-mono, monospace);
+  color: #0f172a;
+  background-color: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 2px;
+  outline: none;
+}
+
+.parse-token-input:focus,
+.parse-select:focus {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.15);
+}
+
+.parse-select {
+  font-family: var(--font-sans, sans-serif);
+  max-width: 240px;
+}
+
+.parse-link-btn {
+  background: transparent;
+  border: none;
+  color: #0284c7;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 6px;
+}
+
+.parse-link-btn:hover {
+  text-decoration: underline;
+}
+
+.parse-provider-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.parse-feedback-text {
+  font-size: 12px;
+  color: #15803d;
+}
+
+.parse-error-text {
+  font-size: 12px;
+  color: #b91c1c;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.parse-hint,
+.parse-empty-state {
+  font-size: 12px;
+  color: #64748b;
+  padding: 10px 0;
+}
+
+.parse-footnote {
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.6;
+  border-top: 1px dashed #e2e8f0;
+  padding-top: 10px;
+}
+
+/* ---------------------------- 导入面板 ---------------------------- */
+
+.parse-file-block,
+.parse-field-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.parse-file-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+  word-break: break-all;
+}
+
+.parse-file-path {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: #64748b;
+  word-break: break-all;
+}
+
+.parse-warning-box {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #92400e;
+  background-color: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 2px;
+  line-height: 1.6;
+}
+
+.parse-upload-notice {
+  font-size: 12px;
+  color: #475569;
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 2px;
+  padding: 10px 12px;
+  line-height: 1.6;
+}
+
+.parse-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* ---------------------------- 任务面板 ---------------------------- */
+
+.parse-job-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.parse-job-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 2px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background-color: #ffffff;
+}
+
+.parse-job-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.parse-job-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.parse-job-provider {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: #475569;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.parse-job-status {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0284c7;
+}
+
+.parse-job-status.is-succeeded {
+  color: #15803d;
+}
+
+.parse-job-status.is-failed {
+  color: #b91c1c;
+}
+
+.parse-job-status.is-cancelled,
+.parse-job-status.is-paused {
+  color: #64748b;
+}
+
+.parse-job-status.is-submission_unknown {
+  color: #b45309;
+}
+
+.parse-job-meta {
+  display: flex;
+  gap: 14px;
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: #64748b;
+}
+
+.parse-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.parse-progress-track {
+  flex: 1;
+  height: 5px;
+  border-radius: 999px;
+  background-color: #e2e8f0;
+  overflow: hidden;
+}
+
+.parse-progress-fill {
+  height: 100%;
+  background-color: #0284c7;
+  transition: width 0.3s ease;
+}
+
+.parse-progress-text {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: #475569;
+  min-width: 34px;
+  text-align: right;
+}
+
+.parse-job-stage-note {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.parse-job-warning {
+  margin-top: 2px;
+}
+
+.parse-job-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.parse-load-more-row {
+  display: flex;
+  justify-content: center;
+  padding-top: 4px;
+}
+
+.parse-jobs-error {
+  padding: 8px 10px;
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 2px;
+}
+
+/* ---------------------------- 轻提示 ---------------------------- */
+
+.parse-toast {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  max-width: 380px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #0f172a;
+  background-color: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-left: 3px solid #0284c7;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
+  border-radius: 2px;
+  z-index: 2600;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.parse-toast-action {
+  background: transparent;
+  border: none;
+  color: #0284c7;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  white-space: nowrap;
+}
+
+.parse-toast-action:hover {
+  text-decoration: underline;
+}
+
+.parse-toast-close {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+/* ---------------------------- 服务状态与诊断反馈 ---------------------------- */
+
+.parse-service-alert-banner {
+  background-color: #fff1f2;
+  border: 1px solid #fecdd3;
+  border-left: 4px solid #e11d48;
+  border-radius: 2px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.parse-service-alert-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.parse-service-alert-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffffff;
+  background-color: #e11d48;
+  padding: 1px 6px;
+  border-radius: 2px;
+}
+
+.parse-service-alert-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #9f1239;
+}
+
+.parse-service-alert-msg {
+  font-size: 12px;
+  color: #be123c;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.parse-service-alert-time {
+  margin-left: 6px;
+  font-size: 11px;
+  color: #881337;
+  font-family: var(--font-mono, monospace);
+}
+
+.parse-service-alert-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
+.parse-job-duration {
+  color: #475569;
+}
+
+.parse-job-queued-note {
+  color: #0369a1;
+  background-color: #f0f9ff;
+  border: 1px dashed #bae6fd;
+  padding: 4px 8px;
+  border-radius: 2px;
+}
+
+.parse-job-pages-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #0369a1;
+  background-color: #f0f9ff;
+  border: 1px solid #e0f2fe;
+  padding: 4px 8px;
+  border-radius: 2px;
+}
+
+.parse-job-pages-hint {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: normal;
+}
+
+.parse-job-error-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background-color: #fef2f2;
+  border: 1px solid #fee2e2;
+  border-radius: 2px;
+  margin-top: 2px;
+}
+
+.parse-error-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.parse-error-stage-tag {
+  color: #991b1b;
+  font-weight: 600;
+}
+
+.parse-error-code-tag {
+  color: #b91c1c;
+  font-family: var(--font-mono, monospace);
+  background-color: #fee2e2;
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.parse-diag-toggle-row {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.parse-link-action-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+  color: #0284c7;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.parse-link-action-btn:hover {
+  color: #0369a1;
+}
+
+.parse-diag-code-box {
+  margin: 6px 0 0 0;
+  padding: 8px;
+  background-color: #1e293b;
+  color: #e2e8f0;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  border-radius: 2px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+}
+

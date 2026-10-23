@@ -1,0 +1,118 @@
+[
+  [
+    {
+      "type": "page_header",
+      "content": {
+        "page_header_content": [
+          { "type": "text", "content": "4 Switch Realization" }
+        ]
+      },
+      "bbox": [160, 48, 321, 63]
+    },
+    {
+      "type": "page_number",
+      "content": {
+        "page_number_content": [
+          { "type": "text", "content": "118" }
+        ]
+      },
+      "bbox": [99, 50, 128, 62]
+    },
+    {
+      "type": "paragraph",
+      "content": {
+        "paragraph_content": [
+          { "type": "text", "content": "A converter circuit containing an ideal diode is illustrated in Fig. 4.68. The voltage " },
+          { "type": "equation_inline", "content": "\\nu _ { A } ( t )" },
+          { "type": "text", "content": " rises from approximately zero to " },
+          { "type": "equation_inline", "content": "V _ { g }" },
+          { "type": "text", "content": " with interval " },
+          { "type": "equation_inline", "content": "( t _ { 1 } - t _ { 0 } )" },
+          { "type": "text", "content": "." }
+        ]
+      },
+      "bbox": [95, 90, 851, 220]
+    },
+    {
+      "type": "image",
+      "content": {
+        "image_source": { "path": "images/fig_circuit.jpg" },
+        "image_caption": [
+          { "type": "text", "content": "Fig. 4.68 Sample switching loss example circuit" }
+        ],
+        "image_footnote": []
+      },
+      "bbox": [404, 77, 851, 190]
+    },
+    {
+      "type": "title",
+      "content": {
+        "title_content": [
+          { "type": "text", "content": "4.5.3 Sample Section Title" }
+        ],
+        "level": 2
+      },
+      "bbox": [95, 467, 353, 484]
+    }
+  ],
+  [
+    {
+      "type": "title",
+      "content": {
+        "title_content": [
+          { "type": "text", "content": "The Chapter Level Title" }
+        ],
+        "level": 1
+      },
+      "bbox": [95, 146, 555, 166]
+    },
+    {
+      "type": "equation_interline",
+      "content": {
+        "math_content": "\\begin{array} { l } { W _ { C } = \\sum _ { i } \\frac { 1 } { 2 } C _ { i } V _ { i } ^ { 2 } } \\\\ { W _ { L } = \\sum _ { j } \\frac { 1 } { 2 } L _ { j } I _ { j } ^ { 2 } } \\end{array}\\tag{4.41}",
+        "math_type": "latex",
+        "image_source": { "path": "images/eq_snapshot.jpg" }
+      },
+      "bbox": [390, 351, 557, 445]
+    },
+    {
+      "type": "table",
+      "content": {
+        "image_source": { "path": "images/table_snapshot.jpg" },
+        "table_caption": [
+          { "type": "text", "content": "Table 4.6 Characteristics of sample devices" }
+        ],
+        "table_footnote": [
+          { "type": "text", "content": "Notes: values are typical at 25 C." }
+        ],
+        "html": "<table><tr><td>Part number</td><td>Rated voltage</td><td> $V _ { F }$  current</td><td> $t _ { f } ( \\mathrm { t y p i c a l } )$ </td></tr><tr><td rowspan=\"2\">SAMPLE-DEVICE-01</td><td>600 V</td><td>23 A</td><td>70 ns</td></tr><tr><td>1200 V</td><td>32 A</td><td>0.62 μs</td></tr></table>",
+        "table_type": "simple_table",
+        "table_nest_level": 0
+      },
+      "bbox": [95, 100, 851, 300]
+    },
+    {
+      "type": "chart",
+      "content": {
+        "image_source": { "path": "images/chart_curve.jpg" },
+        "content": "",
+        "chart_caption": [
+          { "type": "text", "content": "Fig. 4.77 Sample efficiency vs. switching frequency, based on Eq. (4.52)" }
+        ],
+        "chart_footnote": [
+          { "type": "text", "content": "Chart footnote sample" }
+        ]
+      },
+      "bbox": [242, 75, 708, 381]
+    },
+    {
+      "type": "page_footer",
+      "content": {
+        "page_footer_content": [
+          { "type": "text", "content": "Sample footer line with attribution" }
+        ]
+      },
+      "bbox": [93, 859, 599, 905]
+    }
+  ]
+]

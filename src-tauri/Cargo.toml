@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2024"
+default-run = "flowread"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -28,6 +29,19 @@ epub = "2.1.5"
 html2text = "0.17.1"
 rusqlite = { version = "0.33.0", features = ["bundled"] }
 uuid = { version = "1.15.1", features = ["v4"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "multipart"] }
+tokio = { version = "1", features = ["sync", "time", "rt-multi-thread", "fs", "macros"] }
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
+sha2 = "0.10"
+base64 = "0.22"
+regex = "1"
+futures-util = { version = "0.3", default-features = false }
+bytes = "1"
+
+# 系统凭据库：必须显式启用 Windows 原生后端（Credential Manager），
+# 否则 keyring 3.x 会退化为进程内 mock，重启后读不到已保存的 Token。
+# 本应用只发布 Windows 桌面版；其它平台构建不在本轮范围内。
+keyring = { version = "3", features = ["windows-native"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
