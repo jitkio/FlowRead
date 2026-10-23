@@ -54,3 +54,8 @@ credentials/
 __pycache__/
 *.pyc
 *.pyo
+
+# Internal architecture and development documentation
+PROJECT_CONTEXT.md
+docs/
+tools/pdf-parse-eval/README.md
